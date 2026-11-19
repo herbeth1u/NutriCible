@@ -1,0 +1,14 @@
+{
+  "name": "nutricible",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "NutriCible : recueil de repas pour le maintien du poids, application web statique sans build.",
+  "scripts": {
+    "test": "node --test",
+    "validate": "node scripts/validate-data.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+
+# Sauvegardes JSON de l'application : elles contiennent des données personnelles.
+# Ne jamais les déposer dans le dépôt.
+nutricible-sauvegarde*.json
+nutricible-backup*.json
+*.nutricible-backup.json
