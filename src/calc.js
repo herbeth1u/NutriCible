@@ -36,7 +36,8 @@ export const fmtQty = (n) => (Math.abs(n) < 5 && n !== Math.round(n) ? fmtNum(Ma
 export const fmtPer100 = (n) => fmtNum(Math.round(n * 10) / 10, Number.isInteger(Math.round(n * 10) / 10) ? 0 : 1);
 export const unitOf = (food) => (food && food.unit === 'ml' ? 'ml' : 'g');
 
-export const normalize = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+/** Recherche insensible à la casse, aux accents et aux ligatures (« œufs » = « oeufs »). */
+export const normalize = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae').trim();
 
 // ---------------------------------------------------------------- cru / cuit
 // coef = poids cuit ÷ poids cru. Les nutriments d'une portion ne changent pas : seul le poids change.
@@ -164,7 +165,7 @@ export function resolveMeal(def, ctx) {
   const totals = def.cheat ? normPer100(def.cheat) : sum(lines.map((l) => l.macros));
   const seasons = [...new Set(lines.filter((l) => l.kind === 'food' && l.food?.season).map((l) => l.food.season))];
   const category = def.category;
-  const auto = autoTags(totals, seasons, category, config);
+  const auto = def.cheat ? [] : autoTags(totals, seasons, category, config); // un cheat meal est un bloc estimé : pas de tags automatiques
   const manual = def.tags ?? [];
   const mainFoods = [...new Set(lines.filter((l) => l.kind === 'food' && l.food).map((l) => l.food.name))];
   return {
@@ -297,7 +298,7 @@ export function profileStatus(p) {
 /** Métabolisme de base, formule de Mifflin-St Jeor. */
 export function bmr(p, calc) {
   const m = calc.mifflin;
-  return m.weight * p.weightKg + m.height * p.heightCm + m.age * p.age + (p.sex === 'M' ? m.male : m.female);
+  return m.perKg * p.weightKg + m.perCm * p.heightCm + m.perYear * p.age + (p.sex === 'M' ? m.male : m.female);
 }
 
 /** Dépense hors entraînement : valeur « au repos » Garmin si saisie (aucun facteur ajouté), sinon BMR × 1,2. */
