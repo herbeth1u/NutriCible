@@ -1,0 +1,257 @@
+// src/store.js
+// État de l'application, valeurs dérivées (computed) et persistance dans le navigateur.
+// INVARIANTS : une seule fonction de calcul (calc.js) ; aucun total stocké ; clés de stockage
+// préfixées « nutricible:v1: » (le domaine GitHub Pages est partagé entre dépôts) ; tout accès au
+// stockage est protégé par try/catch (l'appli reste utilisable en mémoire).
+
+import { reactive, computed, watch } from './vue.js';
+import * as C from './calc.js';
+import { EDIT_KEYS, backupFileName, emptyUser, mergeBackup, sanitizeUser, serialize, uid } from './backup.js';
+
+export const PREFIX = 'nutricible:v1:';
+const FORMAT_VERSION = 1;
+const USER_KEYS = ['profile', 'meals', 'foods', 'foodEdits', 'deletedFoods', 'replacements'];
+
+let storage = null;
+try {
+  storage = globalThis.localStorage ?? null;
+  if (storage) { storage.setItem(`${PREFIX}probe`, '1'); storage.removeItem(`${PREFIX}probe`); }
+} catch { storage = null; }
+
+export const state = reactive({
+  ready: false,
+  error: '',
+  storageOk: !!storage,
+  base: { foods: [], internal: [], meals: [], days: [], week: [], config: null },
+  user: emptyUser(),
+  day: { dayType: 'repos', items: [] }, // « Ma journée » : items [{ meal, factor }]
+  theme: 'auto',
+  ui: { tab: 'meals', dialog: null, dayOpen: false, filters: C.defaultFilters(), foodFilters: { q: '', types: [], seasons: [], origins: [], usage: '', sort: 'name', dir: 1 }, toast: '' },
+});
+
+const readKey = (k, fallback) => {
+  if (!storage) return fallback;
+  try { const v = storage.getItem(PREFIX + k); return v === null ? fallback : JSON.parse(v); } catch { return fallback; }
+};
+const writeKey = (k, v) => {
+  if (!storage) return;
+  try { storage.setItem(PREFIX + k, JSON.stringify(v)); } catch { state.storageOk = false; }
+};
+
+// ------------------------------------------------------------------ valeurs dérivées
+export const config = computed(() => state.base.config);
+export const internalIdx = computed(() => new Map(state.base.internal.map((i) => [i.id, i])));
+export const foodIdx = computed(() => C.buildFoodIndex({ foods: state.base.foods, internal: state.base.internal, perso: state.user.foods, edits: state.user.foodEdits, deleted: state.user.deletedFoods }));
+export const foods = computed(() => [...foodIdx.value.values()]);
+export const resolveCtx = computed(() => ({ foodIdx: foodIdx.value, internalIdx: internalIdx.value, config: config.value, repl: state.user.replacements }));
+export const mealDefs = computed(() => [...state.base.meals.map((m) => ({ ...m, origin: 'recueil' })), ...state.user.meals.map((m) => ({ ...m, origin: 'perso' }))]);
+export const meals = computed(() => mealDefs.value.map((d) => C.resolveMeal(d, resolveCtx.value)));
+export const mealIdx = computed(() => new Map(meals.value.map((m) => [m.id, m])));
+export const usage = computed(() => {
+  const u = new Map();
+  for (const m of meals.value) for (const id of new Set(m.lines.filter((l) => l.kind === 'food').map((l) => l.id))) u.set(id, (u.get(id) ?? 0) + 1);
+  return u;
+});
+export const deletedFoods = computed(() => state.base.foods.filter((f) => state.user.deletedFoods.includes(f.id)));
+export const profileStatus = computed(() => C.profileStatus(state.user.profile));
+export const targets = computed(() => (profileStatus.value.complete && config.value ? C.allTargets(state.user.profile, config.value) : null));
+export const dayRows = computed(() => state.day.items.map((it, index) => ({ ...it, index, meal: mealIdx.value.get(it.meal) })).filter((r) => r.meal));
+export const dayTotals = computed(() => C.dayTotals(state.day.items, mealIdx.value).totals);
+export const dayTarget = computed(() => targets.value?.[state.day.dayType] ?? null);
+export const foodTypes = computed(() => config.value?.foodTypes ?? []);
+
+// ------------------------------------------------------------------ interface
+let toastTimer;
+export const setTab = (t) => { state.ui.tab = t; };
+export const openDialog = (name, props = {}) => { state.ui.dialog = { name, props }; };
+export const closeDialog = () => { state.ui.dialog = null; };
+export function toast(msg) {
+  state.ui.toast = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { state.ui.toast = ''; }, 4000);
+}
+
+function applyTheme() {
+  if (typeof document === 'undefined') return;
+  if (state.theme === 'light' || state.theme === 'dark') document.documentElement.dataset.theme = state.theme;
+  else delete document.documentElement.dataset.theme;
+}
+export function cycleTheme() { state.theme = state.theme === 'auto' ? 'dark' : state.theme === 'dark' ? 'light' : 'auto'; }
+
+export async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* repli ci-dessous */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.append(ta); ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+export async function copyWithToast(text, label = 'Copié dans le presse-papiers.') {
+  toast((await copyText(text)) ? label : 'Copie impossible : sélectionne le texte manuellement.');
+}
+
+export function downloadFile(name, text, mime) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ------------------------------------------------------------------ profil
+export function saveProfile(p) { state.user.profile = { ...C.emptyProfile(), ...p }; }
+
+// ------------------------------------------------------------------ repas perso
+export const mealNames = (exceptId) => meals.value.filter((m) => m.id !== exceptId).map((m) => m.name);
+export const foodNames = (exceptId) => foods.value.filter((f) => f.id !== exceptId).map((f) => f.name);
+
+export function uniqueMealName(base) {
+  const taken = mealNames();
+  let n = base;
+  for (let i = 2; C.nameTaken(n, taken); i += 1) n = `${base} ${i}`;
+  return n;
+}
+
+/** Brouillon de duplication : n'importe quel repas (recueil ou perso) devient un repas perso modifiable. */
+export function duplicateDraft(m) {
+  return {
+    id: null, name: uniqueMealName(`${m.name} (copie)`), category: m.category, contexts: [...m.contexts], tags: [...m.manualTags],
+    time: m.time, notes: m.notes, prep: m.prep, variant: m.variant,
+    items: m.lines.filter((l) => l.kind === 'food').map((l) => [l.id, l.qty]),
+    internal: m.lines.filter((l) => l.kind === 'internal').map((l) => [l.id, l.qty]),
+  };
+}
+
+export function saveMeal(def) {
+  const clean = { ...def, id: def.id ?? uid('meal'), items: def.items.map(([id, g]) => [id, +g]), internal: (def.internal ?? []).map(([id, g]) => [id, +g]) };
+  const i = state.user.meals.findIndex((m) => m.id === clean.id);
+  if (i >= 0) state.user.meals.splice(i, 1, clean); else state.user.meals.push(clean);
+  return clean.id;
+}
+
+export function deleteMeal(id) {
+  state.user.meals = state.user.meals.filter((m) => m.id !== id);
+  state.day.items = state.day.items.filter((it) => it.meal !== id);
+  if (state.user.replacements[id]) delete state.user.replacements[id];
+}
+
+// ------------------------------------------------------------------ aliments
+const cleanNum = (v) => (Number.isFinite(+v) && +v >= 0 ? +v : 0);
+
+export function addFood(def) {
+  const food = { id: uid('food'), ...def, per100: C.normPer100(def.per100) };
+  for (const k of Object.keys(food)) if (food[k] === null || food[k] === undefined || food[k] === '') delete food[k];
+  state.user.foods.push(food);
+  return food.id;
+}
+
+/** Modifie un aliment : perso = remplacement direct ; recueil = modification stockée à part (réinitialisable). */
+export function updateFood(id, next) {
+  const f = foodIdx.value.get(id);
+  if (!f) return;
+  if (f.origin === 'perso') {
+    const i = state.user.foods.findIndex((x) => x.id === id);
+    const merged = { ...state.user.foods[i], ...next, per100: C.normPer100(next.per100 ?? f.per100) };
+    for (const k of Object.keys(merged)) if (merged[k] === null || merged[k] === undefined || merged[k] === '') delete merged[k];
+    state.user.foods.splice(i, 1, merged);
+    return;
+  }
+  const base = state.base.foods.find((x) => x.id === id);
+  const patch = {};
+  for (const k of EDIT_KEYS) {
+    if (!(k in next)) continue;
+    const ref = k === 'per100' ? f.original : base[k];
+    if (JSON.stringify(next[k] ?? null) !== JSON.stringify(ref ?? null)) patch[k] = k === 'per100' ? C.normPer100(next[k]) : next[k];
+  }
+  if (Object.keys(patch).length) state.user.foodEdits[id] = patch; else delete state.user.foodEdits[id];
+}
+
+export function resetFood(id) { delete state.user.foodEdits[id]; }
+export function resetAllFoodEdits() { state.user.foodEdits = {}; }
+
+export const mealsUsing = (foodId) => meals.value.filter((m) => m.lines.some((l) => l.kind === 'food' && l.id === foodId));
+
+/** mode : 'delete' (les repas concernés deviennent « Incomplet ») ou 'replace' (par l'aliment `by`, même quantité). */
+export function deleteFood(id, mode = 'delete', by = null) {
+  const affected = mealsUsing(id);
+  if (mode === 'replace' && by) {
+    for (const m of affected) {
+      if (m.origin === 'perso') {
+        const i = state.user.meals.findIndex((x) => x.id === m.id);
+        state.user.meals[i] = { ...state.user.meals[i], items: state.user.meals[i].items.map(([fid, g]) => [fid === id ? by : fid, g]) };
+      } else state.user.replacements[m.id] = { ...(state.user.replacements[m.id] ?? {}), [id]: by };
+    }
+  }
+  if (foodIdx.value.get(id)?.origin === 'perso') state.user.foods = state.user.foods.filter((f) => f.id !== id);
+  else if (!state.user.deletedFoods.includes(id)) state.user.deletedFoods.push(id);
+  delete state.user.foodEdits[id];
+}
+
+export function restoreFood(id) {
+  state.user.deletedFoods = state.user.deletedFoods.filter((x) => x !== id);
+  for (const [mealId, map] of Object.entries(state.user.replacements)) {
+    if (id in map) { delete map[id]; if (!Object.keys(map).length) delete state.user.replacements[mealId]; }
+  }
+}
+
+// ------------------------------------------------------------------ « Ma journée »
+export function addToDay(mealId, factor = 1) {
+  const m = mealIdx.value.get(mealId);
+  if (!m || m.incomplete) return false;
+  state.day.items.push({ meal: mealId, factor });
+  return true;
+}
+export const removeFromDay = (index) => { state.day.items.splice(index, 1); };
+export const setDayFactor = (index, factor) => { if (Number.isFinite(+factor) && +factor > 0) state.day.items[index].factor = Math.round(+factor * 100) / 100; };
+export const clearDay = () => { state.day.items = []; };
+
+/** Charge une journée type dans « Ma journée », avec un facteur de portion global. */
+export function loadDay(day, factor = 1) {
+  state.day.dayType = day.dayType;
+  state.day.items = day.items.filter(([id]) => mealIdx.value.get(id) && !mealIdx.value.get(id).incomplete).map(([meal, f]) => ({ meal, factor: Math.round(f * factor * 100) / 100 }));
+  state.ui.dayOpen = true;
+}
+
+// ------------------------------------------------------------------ sauvegarde et restauration
+const plain = (x) => JSON.parse(JSON.stringify(x));
+export const exportBackup = () => downloadFile(backupFileName(), serialize(plain(state.user)), 'application/json');
+
+export function restoreBackup(incoming, strategy) {
+  const reserved = { foods: new Set(state.base.foods.map((f) => C.normalize(f.name))), meals: new Set(state.base.meals.map((m) => C.normalize(m.name))) };
+  const { user, report } = mergeBackup(plain(state.user), incoming, strategy, reserved);
+  Object.assign(state.user, user);
+  return report;
+}
+
+// ------------------------------------------------------------------ initialisation
+const fetchJson = (name) => fetch(`./data/${name}.json`).then((r) => { if (!r.ok) throw new Error(`data/${name}.json : HTTP ${r.status}`); return r.json(); });
+
+function readDay() {
+  const d = readKey('day', null);
+  const types = (state.base.config?.dayTypes ?? []).map((t) => t.id);
+  if (!d || !types.includes(d.dayType) || !Array.isArray(d.items)) return { dayType: 'repos', items: [] };
+  return { dayType: d.dayType, items: d.items.filter((it) => it && typeof it.meal === 'string' && Number.isFinite(it.factor) && it.factor > 0) };
+}
+
+export async function init(load = fetchJson) {
+  try {
+    const [foodsJson, internal, mealsJson, days, cfg] = await Promise.all(['foods', 'internal-ingredients', 'meals', 'days', 'config'].map(load));
+    state.base = { foods: foodsJson.foods, internal: internal.ingredients, meals: mealsJson.meals, days: days.days, week: days.week, config: cfg };
+    state.user = sanitizeUser(Object.fromEntries(USER_KEYS.map((k) => [k, readKey(k, undefined)])));
+    state.day = readDay();
+    state.theme = ['light', 'dark'].includes(readKey('theme', 'auto')) ? readKey('theme', 'auto') : 'auto';
+    applyTheme();
+    writeKey('format', FORMAT_VERSION);
+    for (const k of USER_KEYS) watch(() => state.user[k], (v) => writeKey(k, v), { deep: true });
+    watch(() => state.day, (v) => writeKey('day', v), { deep: true });
+    watch(() => state.theme, (v) => { writeKey('theme', v); applyTheme(); });
+    state.ready = true;
+  } catch (e) {
+    state.error = `Impossible de charger les données (${e.message}). Ouvre le site via GitHub Pages ou un serveur local (voir le README).`;
+  }
+}
+
+export { cleanNum };
