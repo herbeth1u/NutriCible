@@ -144,7 +144,7 @@ export function validateData({ foods, internal, meals, days, config }) {
     if (m.cheat) {
       for (const k of MACROS) if (!isNum(m.cheat[k]) || m.cheat[k] < 0) err(`${where} : bloc cheat meal, ${k} invalide`);
       if (m.items?.length || m.internal?.length) err(`${where} : un cheat meal est un bloc unique, sans aliments de la table`);
-    } else if (!m.items?.length) err(`${where} : aucun aliment`);
+    } else if (!m.items?.length && !m.internal?.length) err(`${where} : aucun aliment`);
     for (const [id, g] of m.items ?? []) {
       if (!foodIds.has(id)) err(`${where} : aliment « ${id} » inconnu`);
       if (!isNum(g) || g <= 0) err(`${where} : quantité invalide pour « ${id} »`);
