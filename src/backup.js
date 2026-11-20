@@ -20,7 +20,7 @@ const pairs = (v) => (Array.isArray(v) ? v.filter((p) => Array.isArray(p) && typ
 export const uid = (prefix) => `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
 const PER100_KEYS = ['kcal', 'protein', 'carbs', 'fat', 'fiber'];
-const cleanPer100 = (p) => Object.fromEntries(PER100_KEYS.map((k) => [k, isObj(p) && num(p[k]) >= 0 ? p[k] : 0]));
+const cleanPer100 = (p) => Object.fromEntries(PER100_KEYS.map((k) => [k, isObj(p) && num(p[k]) !== null && p[k] >= 0 ? p[k] : 0]));
 const cleanPortion = (p) => (isObj(p) && str(p.label) && num(p.g) > 0 ? { label: p.label, g: p.g } : null);
 /** Clés autorisées dans la modification d'un aliment du recueil. */
 export const EDIT_KEYS = ['name', 'type', 'season', 'per100', 'coef', 'weigh', 'portion', 'note', 'estimated'];
