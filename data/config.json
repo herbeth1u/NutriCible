@@ -51,7 +51,7 @@
   ],
   "calc": {
     "activityFactor": 1.2,
-    "mifflin": { "weight": 10, "height": 6.25, "age": -5, "male": 5, "female": -161 },
+    "mifflin": { "perKg": 10, "perCm": 6.25, "perYear": -5, "male": 5, "female": -161 },
     "protein": { "minPerKg": 1.5, "maxPerKg": 1.8 },
     "fiberPer1000kcal": 14,
     "kcalPerGram": { "protein": 4, "carbs": 4, "fat": 9, "fiber": 2 },
