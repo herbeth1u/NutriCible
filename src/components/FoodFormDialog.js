@@ -59,8 +59,12 @@ export default {
 
     const submit = () => {
       if (errors.value.length) return;
+      // Valeurs inchangées (à l'arrondi de saisie près) : on garde les valeurs exactes, sinon un simple « Enregistrer »
+      // créerait une fausse modification (arrondis sur les aliments composés, bruit de conversion cru/cuit).
+      const ref = C.normPer100(refValues());
+      const same = ex && KEYS.every((k) => Math.abs(ref[k] - ex.per100[k]) < 0.006);
       const next = {
-        name: f.name.trim(), type: f.type, season: f.season || null, per100: C.normPer100(refValues()), note: f.note.trim(), estimated: f.estimated,
+        name: f.name.trim(), type: f.type, season: f.season || null, per100: same ? ex.per100 : ref, note: f.note.trim(), estimated: f.estimated,
         portion: f.portionLabel.trim() && +f.portionG > 0 ? { label: f.portionLabel.trim(), g: +f.portionG } : null,
       };
       if (f.convertible) { next.coef = +f.coef; next.weigh = f.weigh; }
