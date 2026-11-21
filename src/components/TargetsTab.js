@@ -8,8 +8,10 @@ export default {
   setup() {
     const cfg = S.config;
     const week = computed(() => C.weekReport(S.state.base.week, S.state.base.days, S.mealIdx.value, S.targets.value, cfg.value.dayTypes));
-    const p = S.state.user.profile;
-    const range = computed(() => (p.weightMinKg && p.weightMaxKg && p.weightKg ? { min: p.weightMinKg, max: p.weightMaxKg, ok: p.weightKg >= p.weightMinKg && p.weightKg <= p.weightMaxKg } : null));
+    const range = computed(() => {
+      const p = S.state.user.profile; // lu dans le computed : le profil est remplacé à chaque enregistrement
+      return p.weightMinKg && p.weightMaxKg && p.weightKg ? { min: p.weightMinKg, max: p.weightMaxKg, ok: p.weightKg >= p.weightMinKg && p.weightKg <= p.weightMaxKg } : null;
+    });
     const outLabel = (id) => (id ? cfg.value.outings.find((o) => o.id === id).label : 'aucune sortie');
     const sgn = (v) => `${v > 0 ? '+' : ''}${C.fmtKcal(v)}`;
     return { cfg, targets: S.targets, status: S.profileStatus, week, range, outLabel, sgn, profile: () => S.openDialog('profile'), kcal: C.fmtKcal, g: C.fmtG, n: C.fmtNum };
