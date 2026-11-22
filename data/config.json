@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "categories": ["Petit-déjeuner", "Déjeuner", "Dîner", "Collation", "Récupération", "Pendant l'effort", "Repas plaisir"],
+  "contexts": [
+    "Jour de repos",
+    "Sortie courte",
+    "Sortie moyenne",
+    "Sortie longue",
+    "Dimanche de récupération",
+    "Veille de sortie longue",
+    "Petit-déjeuner de sortie longue",
+    "Post-effort",
+    "Repas plaisir",
+    "Journée cheat meal",
+    "Veille de repas plaisir",
+    "Lendemain de repas plaisir"
+  ],
+  "manualTags": ["Froid", "Chaud", "Sans cuisson", "À emporter", "Plaisir", "Abats"],
+  "foodTypes": [
+    "Légumes",
+    "Fruits et fruits secs",
+    "Féculents et céréales",
+    "Légumineuses",
+    "Viandes et poissons",
+    "Produits laitiers et œufs",
+    "Matières grasses et oléagineux",
+    "Produits sucrés et cacao",
+    "Aliments de sport",
+    "Boissons",
+    "Autres"
+  ],
+  "seasons": [
+    { "id": "ete", "label": "été" },
+    { "id": "automne-hiver", "label": "automne-hiver" }
+  ],
+  "outings": [
+    { "id": "courte", "label": "Sortie courte", "minKcal": 0, "maxKcal": 749 },
+    { "id": "moyenne", "label": "Sortie moyenne", "minKcal": 750, "maxKcal": 1499 },
+    { "id": "longue", "label": "Sortie longue", "minKcal": 1500, "maxKcal": null }
+  ],
+  "dayTypes": [
+    { "id": "repos", "label": "Jour de repos", "context": "Jour de repos", "outing": null, "kcalFactor": 1, "fatPerKg": 1.1 },
+    { "id": "courte", "label": "Jour de sortie courte", "context": "Sortie courte", "outing": "courte", "kcalFactor": 1, "fatPerKg": 1.0 },
+    { "id": "moyenne", "label": "Jour de sortie moyenne", "context": "Sortie moyenne", "outing": "moyenne", "kcalFactor": 1, "fatPerKg": 1.0 },
+    { "id": "longue", "label": "Jour de sortie longue", "context": "Sortie longue", "outing": "longue", "kcalFactor": 1, "fatPerKg": 1.0 },
+    { "id": "dimanche", "label": "Dimanche de récupération", "context": "Dimanche de récupération", "outing": null, "kcalFactor": 1, "fatPerKg": 1.1 },
+    { "id": "veille-longue", "label": "Veille de sortie longue", "context": "Veille de sortie longue", "outing": null, "kcalFactor": 1.1, "fatPerKg": 0.8 },
+    { "id": "cheat", "label": "Journée cheat meal", "context": "Journée cheat meal", "outing": "courte", "kcalFactor": 1, "fatPerKg": 1.0 },
+    { "id": "veille-plaisir", "label": "Veille de repas plaisir", "context": "Veille de repas plaisir", "outing": "courte", "kcalFactor": 0.92, "fatPerKg": 0.9 },
+    { "id": "lendemain-plaisir", "label": "Lendemain de repas plaisir", "context": "Lendemain de repas plaisir", "outing": "courte", "kcalFactor": 0.92, "fatPerKg": 0.9 }
+  ],
+  "calc": {
+    "activityFactor": 1.2,
+    "mifflin": { "perKg": 10, "perCm": 6.25, "perYear": -5, "male": 5, "female": -161 },
+    "protein": { "minPerKg": 1.5, "maxPerKg": 1.8 },
+    "fiberPer1000kcal": 14,
+    "kcalPerGram": { "protein": 4, "carbs": 4, "fat": 9, "fiber": 2 },
+    "kcalWarningRatio": 0.15
+  },
+  "densityLevels": [
+    { "id": "leger", "emoji": "🟢", "label": "Léger" },
+    { "id": "modere", "emoji": "🟡", "label": "Modéré" },
+    { "id": "dense", "emoji": "🔴", "label": "Dense" }
+  ],
+  "density": {
+    "Petit-déjeuner": { "lightMax": 400, "moderateMax": 600 },
+    "Déjeuner": { "lightMax": 500, "moderateMax": 700 },
+    "Dîner": { "lightMax": 550, "moderateMax": 800 },
+    "Collation": { "lightMax": 200, "moderateMax": 350 },
+    "Récupération": { "lightMax": 200, "moderateMax": 350 },
+    "Pendant l'effort": { "lightMax": 200, "moderateMax": 400 },
+    "Repas plaisir": { "lightMax": 500, "moderateMax": 800 }
+  },
+  "autoTags": {
+    "okBeforeEffort": { "label": "OK avant effort", "maxFiber": 6, "categories": ["Petit-déjeuner", "Déjeuner", "Dîner", "Collation"] },
+    "highProtein": { "label": "Riche en protéines", "minProtein": 25 },
+    "highFiber": { "label": "Riche en fibres", "minFiber": 10 },
+    "seasonal": { "label": "Saisonnier" }
+  },
+  "portionFactors": [0.75, 1, 1.25],
+  "condiments": ["Jus de citron", "Sel", "Poivre", "Moutarde à l'ancienne", "Paprika", "Curry", "Curcuma", "Cannelle"]
+}
