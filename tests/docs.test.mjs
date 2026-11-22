@@ -68,9 +68,9 @@ test('hygiène du dépôt : .nojekyll, .gitignore des sauvegardes, scripts npm, 
 });
 
 test('workflows fournis : CI (validation et tests) et vendorisation', async () => {
-  const ci = await read('github-workflows/ci.yml');
+  const ci = await read('.github/workflows/ci.yml');
   assert.match(ci, /npm run validate/);
   assert.match(ci, /npm test/);
   assert.match(ci, /pull_request/);
-  assert.match(await read('github-workflows/vendor-vue.yml'), /sha256sum/);
+  assert.match(await read('.github/workflows/vendor-vue.yml'), /sha256sum/);
 });
