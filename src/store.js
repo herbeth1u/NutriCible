@@ -7,6 +7,8 @@
 import { reactive, computed, watch } from './vue.js';
 import * as C from './calc.js';
 import { EDIT_KEYS, backupFileName, emptyUser, mergeBackup, sanitizeUser, serialize, uid } from './backup.js';
+import { clampFactor, effectiveFactor, emptyDay, sanitizeDay, withGlobal, withOwn, withoutOwn } from './day.js';
+import { sanitizeFilters, sanitizeFoodFilters, sanitizeTab } from './prefs.js';
 
 export const PREFIX = 'nutricible:v1:';
 const FORMAT_VERSION = 1;
@@ -24,7 +26,7 @@ export const state = reactive({
   storageOk: !!storage,
   base: { foods: [], internal: [], meals: [], days: [], week: [], config: null },
   user: emptyUser(),
-  day: { dayType: 'repos', items: [] }, // « Ma journée » : items [{ meal, factor }]
+  day: emptyDay(), // « Ma journée » : { dayType, global, items: [{ meal, base, own? }] } (voir src/day.js)
   theme: 'auto',
   ui: { tab: 'meals', dialog: null, dayOpen: false, filters: C.defaultFilters(), foodFilters: { q: '', types: [], seasons: [], origins: [], usage: '', sort: 'name', dir: 1 }, toast: '' },
 });
@@ -55,8 +57,8 @@ export const usage = computed(() => {
 export const deletedFoods = computed(() => state.base.foods.filter((f) => state.user.deletedFoods.includes(f.id)));
 export const profileStatus = computed(() => C.profileStatus(state.user.profile));
 export const targets = computed(() => (profileStatus.value.complete && config.value ? C.allTargets(state.user.profile, config.value) : null));
-export const dayRows = computed(() => state.day.items.map((it, index) => ({ ...it, index, meal: mealIdx.value.get(it.meal) })).filter((r) => r.meal));
-export const dayTotals = computed(() => C.dayTotals(state.day.items, mealIdx.value).totals);
+export const dayRows = computed(() => state.day.items.map((it, index) => ({ ...it, index, factor: effectiveFactor(it, state.day.global), own: Number.isFinite(it.own), meal: mealIdx.value.get(it.meal) })).filter((r) => r.meal));
+export const dayTotals = computed(() => C.dayTotals(state.day.items.map((it) => ({ meal: it.meal, factor: effectiveFactor(it, state.day.global) })), mealIdx.value).totals);
 export const dayTarget = computed(() => targets.value?.[state.day.dayType] ?? null);
 export const foodTypes = computed(() => config.value?.foodTypes ?? []);
 
@@ -198,20 +200,25 @@ export function restoreFood(id) {
 }
 
 // ------------------------------------------------------------------ « Ma journée »
+// Le dernier changement l'emporte (voir src/day.js) : un facteur réglé sur un repas lui est propre ;
+// le curseur global remet tous les repas sur ce facteur.
 export function addToDay(mealId, factor = 1) {
   const m = mealIdx.value.get(mealId);
   if (!m || m.incomplete) return false;
-  state.day.items.push({ meal: mealId, factor });
+  state.day.items.push({ meal: mealId, base: factor });
   return true;
 }
 export const removeFromDay = (index) => { state.day.items.splice(index, 1); };
-export const setDayFactor = (index, factor) => { if (Number.isFinite(+factor) && +factor > 0) state.day.items[index].factor = Math.round(+factor * 100) / 100; };
-export const clearDay = () => { state.day.items = []; };
+export const setDayFactor = (index, factor) => { if (Number.isFinite(+factor) && +factor > 0) Object.assign(state.day, withOwn(state.day, index, factor)); };
+export const releaseDayFactor = (index) => { Object.assign(state.day, withoutOwn(state.day, index)); };
+export const setDayGlobal = (g) => { Object.assign(state.day, withGlobal(state.day, g)); };
+export const clearDay = () => { state.day.items = []; state.day.global = 1; };
 
-/** Charge une journée type dans « Ma journée », avec un facteur de portion global. */
+/** Charge une journée type dans « Ma journée » : facteurs de la journée type en base, facteur global = `factor`. */
 export function loadDay(day, factor = 1) {
   state.day.dayType = day.dayType;
-  state.day.items = day.items.filter(([id]) => mealIdx.value.get(id) && !mealIdx.value.get(id).incomplete).map(([meal, f]) => ({ meal, factor: Math.round(f * factor * 100) / 100 }));
+  state.day.global = clampFactor(factor);
+  state.day.items = day.items.filter(([id]) => mealIdx.value.get(id) && !mealIdx.value.get(id).incomplete).map(([meal, f]) => ({ meal, base: f }));
   state.ui.dayOpen = true;
 }
 
@@ -229,12 +236,7 @@ export function restoreBackup(incoming, strategy) {
 // ------------------------------------------------------------------ initialisation
 const fetchJson = (name) => fetch(`./data/${name}.json`).then((r) => { if (!r.ok) throw new Error(`data/${name}.json : HTTP ${r.status}`); return r.json(); });
 
-function readDay() {
-  const d = readKey('day', null);
-  const types = (state.base.config?.dayTypes ?? []).map((t) => t.id);
-  if (!d || !types.includes(d.dayType) || !Array.isArray(d.items)) return { dayType: 'repos', items: [] };
-  return { dayType: d.dayType, items: d.items.filter((it) => it && typeof it.meal === 'string' && Number.isFinite(it.factor) && it.factor > 0) };
-}
+const readDay = () => sanitizeDay(readKey('day', null), (state.base.config?.dayTypes ?? []).map((t) => t.id));
 
 export async function init(load = fetchJson) {
   try {
@@ -242,11 +244,18 @@ export async function init(load = fetchJson) {
     state.base = { foods: foodsJson.foods, internal: internal.ingredients, meals: mealsJson.meals, days: days.days, week: days.week, config: cfg };
     state.user = sanitizeUser(Object.fromEntries(USER_KEYS.map((k) => [k, readKey(k, undefined)])));
     state.day = readDay();
+    // Préférences d'interface : revalidées à la lecture (le contenu de data/ ou les aliments ont pu changer).
+    Object.assign(state.ui.filters, sanitizeFilters(readKey('filters', null), { config: cfg, foodIds: [...foodIdx.value.keys()] }));
+    Object.assign(state.ui.foodFilters, sanitizeFoodFilters(readKey('foodFilters', null), cfg));
+    state.ui.tab = sanitizeTab(readKey('tab', null));
     state.theme = ['light', 'dark'].includes(readKey('theme', 'auto')) ? readKey('theme', 'auto') : 'auto';
     applyTheme();
     writeKey('format', FORMAT_VERSION);
     for (const k of USER_KEYS) watch(() => state.user[k], (v) => writeKey(k, v), { deep: true });
     watch(() => state.day, (v) => writeKey('day', v), { deep: true });
+    watch(() => state.ui.filters, (v) => writeKey('filters', v), { deep: true });
+    watch(() => state.ui.foodFilters, (v) => writeKey('foodFilters', v), { deep: true });
+    watch(() => state.ui.tab, (v) => writeKey('tab', v));
     watch(() => state.theme, (v) => { writeKey('theme', v); applyTheme(); });
     state.ready = true;
   } catch (e) {
