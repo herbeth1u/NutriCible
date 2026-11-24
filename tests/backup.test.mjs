@@ -147,3 +147,84 @@ test('fusion : ne modifie pas les objets passés en paramètre', () => {
   mergeBackup(cur, inc, 'rename');
   assert.equal(JSON.stringify([cur, inc]), snapshot);
 });
+
+// ------------------------------------------------------------------ format 2 : « Ma journée » et planning de la semaine
+const day = (items = [{ meal: 'col-fb-noix-miel', base: 1 }, { meal: 'perso-m1', base: 0.75, own: 1.5 }], o = {}) => ({ dayType: 'courte', global: 1.15, items, ...o });
+const plan = (o = {}) => ({ v: 1, seed: 42, days: [{ label: 'Lundi', dayType: 'courte', seed: 7, meals: [['Dîner', 'perso-m1'], ['Déjeuner', 'dej-pois-casses-poulet']] }, { label: 'Mardi', dayType: 'cheat', seed: 8, meals: [['Repas plaisir', 'pla-cheat-buffet']] }], ...o });
+
+test('format 2 : le format courant est 2 et le fichier contient « Ma journée » et le planning', () => {
+  assert.equal(FORMAT, 2);
+  const f = JSON.parse(serialize(user({ day: day(), plan: plan() })));
+  assert.equal(f.format, 2);
+  assert.deepEqual(f.data.day, day());
+  assert.deepEqual(f.data.plan, plan());
+});
+
+test('format 2 : aller-retour sans perte de « Ma journée » (facteurs propres compris) et du planning (graines comprises)', () => {
+  const u = user({ profile: { ...FICTIVE }, meals: [meal('perso-m1', 'Mon repas')], day: day(), plan: plan() });
+  const r = parseBackup(serialize(u));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.data, u);
+  assert.equal(r.data.plan.seed, 42);
+  assert.equal(r.data.plan.days[0].seed, 7);
+  assert.equal(r.data.day.items[1].own, 1.5);
+});
+
+test('format 2 : une sauvegarde de format 1 est migrée (pas de « Ma journée » ni de planning, rien d\'autre ne change)', () => {
+  const v1 = { app: APP, format: 1, exportedAt: '2026-11-20T10:00:00.000Z', data: { profile: { ...FICTIVE }, meals: [meal('m', 'Ok')], foods: [], foodEdits: {}, deletedFoods: ['kiwi'], replacements: { a: { b: 'c' } } } };
+  const r = parseBackup(JSON.stringify(v1));
+  assert.equal(r.ok, true);
+  assert.equal(r.data.day, null);
+  assert.equal(r.data.plan, null);
+  assert.deepEqual(r.data.meals.map((m) => m.id), ['m']);
+  assert.deepEqual(r.data.replacements, { a: { b: 'c' } });
+  assert.equal(r.data.profile.age, FICTIVE.age);
+  assert.deepEqual(migrate(v1).day, null);
+  assert.deepEqual(migrate({ app: APP, format: 0, data: {} }).plan, null, 'la migration enchaîne 0 → 1 → 2');
+});
+
+test('format 2 : relecture sûre de « Ma journée » et du planning (valeurs invalides écartées)', () => {
+  const u = sanitizeUser({ day: { dayType: 'repos', global: 9, items: [{ meal: 'a', base: 1 }, { meal: 'b', base: -1 }, null, { meal: 3 }] }, plan: { seed: 'x', days: [{ label: 'Lundi', dayType: 'courte', meals: [['Dîner', 'a'], 3] }] } });
+  assert.deepEqual(u.day, { dayType: 'repos', global: 2, items: [{ meal: 'a', base: 1 }] });
+  assert.deepEqual(u.plan, { v: 1, seed: 0, days: [{ label: 'Lundi', dayType: 'courte', seed: 0, meals: [['Dîner', 'a']] }] });
+  assert.equal(sanitizeUser({ day: 'non', plan: { days: 'non' } }).day, null);
+  assert.equal(sanitizeUser({ day: 'non', plan: { days: 'non' } }).plan, null);
+  assert.equal(sanitizeUser({ plan: { days: [{ label: 'Lundi', dayType: '' }] } }).plan, null);
+});
+
+test('fusion format 2 : tout remplacer reprend « Ma journée » et le planning ; null ne remplace rien', () => {
+  const cur = user({ day: day([{ meal: 'a', base: 1 }]), plan: plan({ seed: 1 }) });
+  const full = mergeBackup(cur, user({ day: day([{ meal: 'b', base: 1 }]), plan: plan({ seed: 2 }) }), 'replace-all').user;
+  assert.deepEqual(full.day.items, [{ meal: 'b', base: 1 }]);
+  assert.equal(full.plan.seed, 2);
+  const none = mergeBackup(cur, user(), 'replace').user;
+  assert.deepEqual(none.day, cur.day, 'sauvegarde sans « Ma journée » : la journée actuelle reste');
+  assert.equal(none.plan.seed, 1);
+});
+
+test('fusion format 2 : « garder l\'existant » ne remplace ni une journée remplie ni un planning ; « remplacer » le fait', () => {
+  const cur = user({ day: day([{ meal: 'a', base: 1 }]), plan: plan({ seed: 1 }) });
+  const inc = user({ day: day([{ meal: 'b', base: 1 }]), plan: plan({ seed: 2 }) });
+  const keep = mergeBackup(cur, inc, 'keep').user;
+  assert.deepEqual(keep.day.items, [{ meal: 'a', base: 1 }]);
+  assert.equal(keep.plan.seed, 1);
+  const rep = mergeBackup(cur, inc, 'replace').user;
+  assert.deepEqual(rep.day.items, [{ meal: 'b', base: 1 }]);
+  assert.equal(rep.plan.seed, 2);
+  const empty = user({ day: day([]) });
+  const fill = mergeBackup(empty, inc, 'keep').user;
+  assert.deepEqual(fill.day.items, [{ meal: 'b', base: 1 }], 'une journée vide est remplie');
+  assert.equal(fill.plan.seed, 2, 'pas de planning : on prend celui de la sauvegarde');
+});
+
+test('fusion format 2 : « Ma journée » et le planning suivent les repas perso renommés ou fusionnés', () => {
+  const cur = user({ meals: [meal('m1', 'Mon repas')] });
+  const inc = user({ meals: [meal('m9', 'Mon repas')], day: day([{ meal: 'm9', base: 1 }, { meal: 'col-fb-noix-miel', base: 1 }]), plan: plan({ days: [{ label: 'Lundi', dayType: 'repos', seed: 1, meals: [['Dîner', 'm9']] }] }) });
+  const ren = mergeBackup(cur, inc, 'rename').user;
+  const copy = ren.meals.find((m) => m.name === 'Mon repas (importé)');
+  assert.deepEqual(ren.day.items.map((it) => it.meal), [copy.id, 'col-fb-noix-miel']);
+  assert.deepEqual(ren.plan.days[0].meals, [['Dîner', copy.id]]);
+  const keep = mergeBackup(cur, inc, 'keep').user;
+  assert.deepEqual(keep.day.items.map((it) => it.meal), ['m1', 'col-fb-noix-miel'], 'fusionné avec le repas existant');
+  assert.deepEqual(keep.plan.days[0].meals, [['Dîner', 'm1']]);
+});
