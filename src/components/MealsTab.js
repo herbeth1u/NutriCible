@@ -5,6 +5,7 @@ import * as C from '../calc.js';
 import * as S from '../store.js';
 import Pills from './Pills.js';
 import MealCard from './MealCard.js';
+import { activeFilterCount } from '../prefs.js';
 
 /** Curseur « au moins » / « au plus » : null = indifférent (aucune borne). */
 const RangeFilter = {
@@ -40,8 +41,9 @@ export default {
     const foodName = (id) => S.foodIdx.value.get(id)?.name ?? id;
     const addFood = (e) => { const id = e.target.value; if (id && !f.foods.includes(id)) f.foods.push(id); e.target.value = ''; };
     const reset = () => Object.assign(f, C.defaultFilters());
+    const active = computed(() => activeFilterCount(f));
     const create = () => S.openDialog('meal', { draft: { id: null, name: '', category: 'Dîner', contexts: [], tags: [], time: null, notes: '', prep: '', variant: '', items: [], internal: [] }, mode: 'create' });
-    return { f, cfg, filtered, bounds, densities, tagOptions, sortedFoods, foodName, addFood, reset, create, total: computed(() => S.meals.value.length) };
+    return { f, cfg, active, filtered, bounds, densities, tagOptions, sortedFoods, foodName, addFood, reset, create, total: computed(() => S.meals.value.length) };
   },
   template: `
     <section aria-labelledby="t-meals">
@@ -51,7 +53,7 @@ export default {
         <button type="button" class="btn primary" @click="create">+ Créer mon repas</button>
       </div>
       <details class="filters" open>
-        <summary>Filtres</summary>
+        <summary>Filtres<template v-if="active"> ({{ active }} actif<template v-if="active > 1">s</template>)</template></summary>
         <pills label="Catégorie" :options="cfg.categories" v-model="f.categories" />
         <pills label="Contexte" :options="cfg.contexts" v-model="f.contexts" />
         <pills label="Type d'aliment" :options="cfg.foodTypes" v-model="f.foodTypes" />
@@ -75,7 +77,7 @@ export default {
         </div>
       </details>
       <div class="resultbar">
-        <span role="status" aria-live="polite"><b>{{ filtered.length }}</b> repas sur {{ total }}</span>
+        <span role="status" aria-live="polite"><b>{{ filtered.length }}</b> repas sur {{ total }}<template v-if="active"> · <b>{{ active }}</b> filtre<template v-if="active > 1">s</template> actif<template v-if="active > 1">s</template></template></span>
         <label>Tri
           <select v-model="f.sort">
             <option value="name">Nom</option><option value="kcal">Kcal</option><option value="protein">Protéines</option>
