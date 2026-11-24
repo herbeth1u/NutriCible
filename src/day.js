@@ -51,3 +51,6 @@ export const withOwn = (day, index, f) => ({ ...day, items: day.items.map((it, i
 
 /** Rend un repas au facteur global. */
 export const withoutOwn = (day, index) => ({ ...day, items: day.items.map((it, i) => { if (i !== index) return it; const { own, ...rest } = it; return rest; }) });
+
+/** Remplace le repas d'une ligne de « Ma journée » (variante, par exemple) en gardant son facteur de départ et son facteur propre. */
+export const withMeal = (day, index, mealId) => ({ ...day, items: day.items.map((it, i) => (i === index ? { ...it, meal: mealId } : it)) });
