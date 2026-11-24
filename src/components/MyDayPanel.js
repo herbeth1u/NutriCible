@@ -10,7 +10,7 @@ export default {
   setup() {
     const d = S.state.day;
     const copy = () => S.copyWithToast(C.dayToText(S.config.value.dayTypes.find((t) => t.id === d.dayType).label, S.dayRows.value, S.dayTotals.value, S.dayTarget.value), 'Journée copiée.');
-    return { d, rows: S.dayRows, totals: S.dayTotals, target: S.dayTarget, status: S.profileStatus, dayTypes: S.config.value.dayTypes, factors: S.config.value.portionFactors, kcal: C.fmtKcal, g: C.fmtG, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0), remove: S.removeFromDay, setFactor: S.setDayFactor, clear: S.clearDay, copy, profile: () => S.openDialog('profile'), close: () => { S.state.ui.dayOpen = false; }, config: S.config };
+    return { d, rows: S.dayRows, totals: S.dayTotals, target: S.dayTarget, status: S.profileStatus, dayTypes: S.config.value.dayTypes, factors: S.config.value.portionFactors, kcal: C.fmtKcal, g: C.fmtG, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0), remove: S.removeFromDay, setFactor: S.setDayFactor, release: S.releaseDayFactor, setGlobal: S.setDayGlobal, clear: S.clearDay, copy, profile: () => S.openDialog('profile'), close: () => { S.state.ui.dayOpen = false; }, config: S.config };
   },
   template: `
     <aside class="myday" aria-labelledby="myday-h">
@@ -19,6 +19,13 @@ export default {
         <select v-model="d.dayType"><option v-for="t in dayTypes" :key="t.id" :value="t.id">{{ t.label }}</option></select>
       </label>
       <p v-if="!status.complete" class="notice small">Renseigne <button type="button" class="linklike" @click="profile">Mon profil</button> pour comparer à ta cible (il manque : {{ status.missing.join(', ') }}).</p>
+      <div v-if="rows.length" class="globalfactor">
+        <label>Portions de toute la journée <b>×{{ n(d.global) }}</b>
+          <input type="range" min="0.5" max="2" step="0.05" :value="d.global" @input="setGlobal($event.target.value)" aria-describedby="gf-help">
+        </label>
+        <button type="button" class="btn sm" :disabled="d.global === 1" @click="setGlobal(1)">×1</button>
+        <small id="gf-help" class="muted">Bouger ce curseur remet tous les repas sur ce facteur ; un facteur réglé ensuite sur un repas ne concerne que lui.</small>
+      </div>
       <ul v-if="rows.length" class="dayrows">
         <li v-for="r in rows" :key="r.index">
           <div class="dayrow-head"><b>{{ r.meal.name }}</b><button type="button" class="icon" @click="remove(r.index)" :aria-label="'Retirer ' + r.meal.name">✕</button></div>
@@ -27,6 +34,8 @@ export default {
               <button v-for="f in factors" :key="f" type="button" :aria-pressed="r.factor === f" @click="setFactor(r.index, f)">×{{ n(f) }}</button>
             </span>
             <label class="inline"><span class="sr-only">Portion libre</span><input type="number" min="0.1" max="5" step="0.05" :value="r.factor" @change="setFactor(r.index, $event.target.value)"></label>
+            <span v-if="r.own" class="badge soft" title="Facteur réglé sur ce repas">fixé</span>
+            <button v-if="r.own" type="button" class="icon" @click="release(r.index)" :aria-label="'Revenir au facteur global pour ' + r.meal.name" title="Revenir au facteur global">↺</button>
             <span class="muted">{{ kcal(r.meal.totals.kcal * r.factor) }} kcal</span>
           </div>
           <details v-if="r.meal.lines.length"><summary>Ingrédients</summary><ingredient-list :lines="r.meal.lines" :factor="r.factor" /></details>
