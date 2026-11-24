@@ -3,6 +3,7 @@ import { computed, reactive } from '../vue.js';
 import * as C from '../calc.js';
 import * as S from '../store.js';
 import Bar from './Bar.js';
+import { clampFactor } from '../day.js';
 
 export default {
   components: { Bar },
@@ -20,7 +21,8 @@ export default {
     const adjust = (x) => { fits[x.day.id] = C.fitFactor(C.dayTotals(stored(x.day), idx.value).totals.kcal, x.target.kcal); };
     const load = (x) => { S.loadDay(x.day, x.fit); S.toast(`« ${x.day.name} » chargée dans Ma journée.`); };
     const delta = (x) => (x.target ? Math.round(x.totals.kcal - x.target.kcal) : null);
-    return { days, fits, label, adjust, load, delta, status: S.profileStatus, profile: () => S.openDialog('profile'), kcal: C.fmtKcal, g: C.fmtG, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0) };
+    const setFit = (x, v) => { fits[x.day.id] = clampFactor(v); };
+    return { days, fits, label, adjust, load, delta, setFit, status: S.profileStatus, profile: () => S.openDialog('profile'), kcal: C.fmtKcal, g: C.fmtG, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0) };
   },
   template: `
     <section aria-labelledby="t-days">
@@ -40,6 +42,12 @@ export default {
           </tbody>
           <tfoot><tr><th scope="row">Total</th><td colspan="3"><b>{{ kcal(x.totals.kcal) }} kcal</b> · P {{ g(x.totals.protein) }} g · G {{ g(x.totals.carbs) }} g · L {{ g(x.totals.fat) }} g · F {{ g(x.totals.fiber) }} g</td></tr></tfoot>
         </table>
+        <div class="globalfactor">
+          <label>Portions de la journée <b>×{{ n(x.fit) }}</b>
+            <input type="range" min="0.5" max="2" step="0.05" :value="x.fit" @input="setFit(x, $event.target.value)">
+          </label>
+          <button type="button" class="btn sm" :disabled="x.fit === 1" @click="setFit(x, 1)">×1</button>
+        </div>
         <div v-if="x.target" class="bars" aria-live="polite">
           <p><b>Cible : {{ kcal(x.target.kcal) }} kcal</b> · écart <b>{{ delta(x) > 0 ? '+' : '' }}{{ delta(x) }} kcal</b><template v-if="x.fit !== 1"> · portions ×{{ n(x.fit) }}</template></p>
           <bar label="Kcal" :value="x.totals.kcal" :target="x.target.kcal" unit="kcal" />
@@ -48,7 +56,6 @@ export default {
         </div>
         <div class="actions">
           <button type="button" class="btn" :disabled="!x.target" @click="adjust(x)">Ajuster à ma cible</button>
-          <button type="button" class="btn" v-if="x.fit !== 1" @click="delete fits[x.day.id]">Revenir aux portions d'origine</button>
           <button type="button" class="btn primary" @click="load(x)">Charger dans Ma journée</button>
         </div>
       </article>

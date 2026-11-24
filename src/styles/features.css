@@ -1,0 +1,7 @@
+/* src/styles/features.css — styles des fonctionnalités ajoutées après la v1 (curseurs globaux de portions, etc.). */
+
+/* --- curseur global de portions (Ma journée, journées types) */
+.globalfactor { display: flex; flex-wrap: wrap; gap: .3rem .7rem; align-items: center; padding: .5rem .7rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface2); margin: .5rem 0; }
+.globalfactor label { display: grid; gap: .15rem; flex: 1 1 11rem; font-size: .9rem; }
+.globalfactor b { color: var(--accent); }
+.globalfactor small { flex-basis: 100%; }

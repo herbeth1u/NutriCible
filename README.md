@@ -37,6 +37,13 @@ puis ouvre http://localhost:8000/.
 1. Ouvre **Mon profil** (en-tête) et renseigne sexe, âge, taille, poids. Facultatif : fourchette de poids cible, dépense « au repos » de ta montre Garmin (utilisée telle quelle, sans facteur d'activité), calories actives d'une sortie longue de référence (par défaut le seuil bas, 1 500 kcal).
 2. Tant que le profil est vide, un bandeau t'invite à le renseigner et les totaux restent affichés sans comparaison à une cible.
 3. Parcours les onglets : **Repas**, **Journées types**, **Cibles et hypothèses**, **Substitutions et ajustements**, **Aliments**. Le panneau **Ma journée** reste accessible depuis tous les onglets.
+4. Tes filtres et tris de l'onglet Repas, ceux de l'onglet Aliments, l'onglet actif et « Ma journée » sont retrouvés quand tu reviens sur la page (un compteur indique les filtres actifs).
+
+### Ajuster les portions
+
+Un **curseur global** (×0,5 à ×2, par pas de 0,05) règle les portions de toute une journée, dans **Journées types** comme dans **Ma journée**. Dans « Ma journée », le dernier changement l'emporte : un facteur réglé sur un repas lui est propre ; bouger ensuite le curseur global remet tous les repas sur ce facteur.
+
+L'onglet **Cibles et hypothèses** donne un **facteur conseillé par jour** et le bilan hebdomadaire de la semaine type après ajustement : les journées types sont dimensionnées pour un adulte moyen, ce calcul (fait dans ton navigateur, à partir de ton profil) les ramène au maintien.
 
 ### Vocabulaire des sorties
 
