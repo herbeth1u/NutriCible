@@ -51,6 +51,13 @@ test('documentation : README et CLAUDE.md rappellent la règle de confidentialit
   }
 });
 
+test('documentation : plus de référence au dossier github-workflows/ (les workflows sont dans .github/workflows/)', async () => {
+  for (const f of ['README.md', 'CLAUDE.md']) assert.ok(!(await read(f)).includes('github-workflows'), `${f} : phrase obsolète sur github-workflows/`);
+  assert.ok(!(await exists('github-workflows')), 'le dossier github-workflows/ ne doit pas exister');
+  assert.ok((await read('README.md')).includes('.github/workflows/'));
+  assert.ok((await read('CLAUDE.md')).includes('.github/workflows/'));
+});
+
 test('hygiène du dépôt : .nojekyll, .gitignore des sauvegardes, scripts npm, Vue épinglé avec empreinte', async () => {
   assert.ok(await exists('.nojekyll'));
   const ignore = await read('.gitignore');

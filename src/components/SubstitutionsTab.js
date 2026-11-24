@@ -3,22 +3,21 @@
 import { computed, reactive } from '../vue.js';
 import * as C from '../calc.js';
 import * as S from '../store.js';
+import SubstitutePanel from './SubstitutePanel.js';
 
 export default {
+  components: { SubstitutePanel },
   setup() {
     const sub = reactive({ id: '', qty: 100 });
     const sorted = computed(() => [...S.foods.value].sort((a, b) => a.name.localeCompare(b.name, 'fr')));
     const base = computed(() => S.foodIdx.value.get(sub.id) ?? null);
-    // Proximité = écart des parts de protéines, glucides et lipides par kcal ; on garde le même type d'aliment.
-    const share = (f) => { const k = f.per100.kcal || 1; return [f.per100.protein * 4 / k, f.per100.carbs * 4 / k, f.per100.fat * 9 / k]; };
-    const similar = computed(() => {
-      const b = base.value;
-      if (!b || !(+sub.qty > 0) || !(b.per100.kcal > 0)) return [];
-      const sb = share(b);
-      return S.foods.value.filter((f) => f.id !== b.id && f.type === b.type && f.per100.kcal > 0)
-        .map((f) => ({ f, d: share(f).reduce((s, v, i) => s + Math.abs(v - sb[i]), 0), qty: (+sub.qty * b.per100.kcal) / f.per100.kcal }))
-        .sort((x, y) => x.d - y.d).slice(0, 6);
-    });
+    // Le calculateur n'enregistre rien : le classement est celui de SubstitutePanel (src/substitute.js).
+    const openFood = (id) => {
+      const f = S.foodIdx.value.get(id);
+      if (!f) return;
+      Object.assign(S.state.ui.foodFilters, { q: f.name, types: [], seasons: [], origins: [], usage: '' });
+      S.setTab('foods');
+    };
 
     const act = reactive({ kcal: null });
     const outing = computed(() => (act.kcal === null || act.kcal === '' || !(+act.kcal >= 0) ? null : [...S.config.value.outings].reverse().find((o) => +act.kcal >= o.minKcal)));
@@ -31,24 +30,21 @@ export default {
       const kcal = rest + +act.kcal;
       return { kcal, ref: t[dayType.value.id].kcal, factor: C.fitFactor(t[dayType.value.id].kcal, kcal) };
     });
-    return { sub, sorted, base, similar, act, outing, dayType, today, status: S.profileStatus, cfg: S.config, kcal: C.fmtKcal, q: C.fmtQty, p: C.fmtPer100, n: C.fmtNum, profile: () => S.openDialog('profile') };
+    return { sub, sorted, base, openFood, act, outing, dayType, today, status: S.profileStatus, cfg: S.config, kcal: C.fmtKcal, q: C.fmtQty, p: C.fmtPer100, n: C.fmtNum, profile: () => S.openDialog('profile') };
   },
   template: `
     <section aria-labelledby="t-subs">
       <h2 id="t-subs">Substitutions et ajustements</h2>
 
       <h3>Échanger un aliment</h3>
-      <p class="muted">Pour garder les mêmes kcal, remplace l'aliment par un autre du même type en ajustant la quantité. Les aliments proposés ont la répartition protéines / glucides / lipides la plus proche. Dans un repas, change l'aliment depuis le créateur de repas (« Dupliquer » puis « Modifier »).</p>
+      <p class="muted">Calculateur : pour garder la même quantité de kcal, de protéines ou de glucides, remplace l'aliment par un autre du même type en ajustant la quantité. Les aliments proposés ont la répartition protéines / glucides / lipides la plus proche ; une recherche libre couvre tous les types. Pour substituer un aliment dans un repas, utilise le bouton ⇄ d'une ligne d'ingrédient (fiche du repas, « Ma journée ») : il prépare une variante à enregistrer.</p>
       <div class="box form">
         <div class="grid2">
           <label>Aliment à remplacer <select v-model="sub.id"><option value="">Choisir…</option><option v-for="f in sorted" :key="f.id" :value="f.id">{{ f.name }}</option></select></label>
           <label>Quantité ({{ base ? (base.unit) : 'g' }}, état de référence) <input type="number" min="1" step="any" v-model="sub.qty"></label>
         </div>
         <p v-if="base" class="muted small">{{ base.name }} : {{ p(base.per100.kcal) }} kcal pour 100 {{ base.unit }}<template v-if="base.convertible"> ({{ base.state }})</template>.</p>
-        <ul v-if="similar.length" class="used">
-          <li v-for="s in similar" :key="s.f.id"><b>{{ q(s.qty) }} {{ s.f.unit }}</b> de {{ s.f.name }} <span class="muted">({{ p(s.f.per100.kcal) }} kcal, P {{ p(s.f.per100.protein) }} · G {{ p(s.f.per100.carbs) }} · L {{ p(s.f.per100.fat) }} pour 100)</span></li>
-        </ul>
-        <p v-else-if="base" class="muted">Aucun aliment du même type à proposer.</p>
+        <substitute-panel v-if="base && +sub.qty > 0" :key="base.id" mode="calc" :food-id="base.id" :qty="+sub.qty" @open-food="openFood" />
       </div>
 
       <h3>Ajuster les quantités à la dépense réelle du jour</h3>

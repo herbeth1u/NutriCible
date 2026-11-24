@@ -45,6 +45,14 @@ Un **curseur global** (×0,5 à ×2, par pas de 0,05) règle les portions de tou
 
 L'onglet **Cibles et hypothèses** donne un **facteur conseillé par jour** et le bilan hebdomadaire de la semaine type après ajustement : les journées types sont dimensionnées pour un adulte moyen, ce calcul (fait dans ton navigateur, à partir de ton profil) les ramène au maintien.
 
+### Fiche repas et substitution
+
+- Dans **Ma journée**, le nom d'un repas ouvre sa **fiche complète en popup** : macros (pour la portion de la journée), recette, variante, contextes, switch Cru / Cuit et actions (copier, dupliquer, modifier si le repas est perso, retirer de la journée). La liste de « Ma journée » ne garde que le nom, la catégorie, la densité et les kcal de la portion ; le bouton « Ingrédients » reste plié-déplié.
+- Chaque ligne d'ingrédient a un bouton **⇄** (fiche repas, « Ma journée », carte de l'onglet Repas). Il ouvre le panneau de substitution : aliments proches du même type, triés par répartition de macros, avec la **quantité équivalente en kcal, en protéines ou en glucides** (au choix) et une recherche libre sur tous les types.
+- Choisir un aliment ouvre **« Dupliquer ce repas »** avec la variante préremplie (un repas perso). Le même panneau ⇄ est disponible sur chaque ligne de ce formulaire : on peut substituer plusieurs aliments avant d'enregistrer. À l'enregistrement, la variante **remplace le repas dans « Ma journée »**, avec la même portion. Fermer la fenêtre ne change rien.
+- Si une variante identique existe déjà (même catégorie, mêmes aliments aux mêmes quantités), l'appli la propose au lieu d'en créer une nouvelle.
+- La page **Substitutions et ajustements → Échanger un aliment** reste un calculateur : même classement, sans rien enregistrer, avec un lien vers la fiche de chaque aliment (onglet Aliments).
+
 ### Vocabulaire des sorties
 
 Trois termes seulement, d'après les **calories actives** de la montre : **sortie courte** (0 à 749 kcal), **sortie moyenne** (750 à 1 499 kcal), **sortie longue** (1 500 kcal ou plus).
@@ -99,7 +107,7 @@ sha256sum vendor/vue.esm-browser.prod.js   # doit correspondre à vendor/VERSION
 
 ### Intégration continue
 
-Les workflows GitHub Actions sont dans `github-workflows/` : `ci.yml` (validation et tests à chaque push et pull request) et `vendor-vue.yml` (vendorisation automatique de Vue). Pour les activer, déplace-les dans `.github/workflows/` : `git mv github-workflows .github/workflows`.
+Les workflows GitHub Actions sont dans `.github/workflows/` : `ci.yml` (validation et tests à chaque push et pull request) et `vendor-vue.yml` (vendorisation automatique de Vue).
 
 ### Structure
 
@@ -109,6 +117,7 @@ src/main.js           démarrage
 src/vue.js            point d'entrée unique de Vue
 src/store.js          état, valeurs dérivées, persistance préfixée
 src/calc.js           fonctions pures : une seule fonction de calcul pour tous les repas
+src/substitute.js     substitution d'aliments (aliments proches, quantité équivalente, variante identique)
 src/notion-export.js  génération du CSV
 src/backup.js         sauvegarde, restauration, migrations de format
 src/components/       un fichier par onglet et par boîte de dialogue

@@ -125,8 +125,8 @@ abbr[title] { text-decoration: none; cursor: help; }
 .box { border: 1px solid var(--border); border-radius: 10px; padding: .6rem .8rem; background: var(--surface); }
 .box > legend, .box > summary { font-weight: 600; padding: 0 .3rem; }
 .lines { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; }
-.lines li { display: flex; flex-wrap: wrap; gap: .3rem .7rem; align-items: center; padding: .3rem .5rem; border: 1px solid var(--border); border-radius: 8px; }
-.lines .n { flex: 1 1 10rem; font-weight: 500; } .lines li.missing { border-color: var(--danger); } .lines li.internal { background: var(--surface2); }
+.lines > li { display: flex; flex-wrap: wrap; gap: .3rem .7rem; align-items: center; padding: .3rem .5rem; border: 1px solid var(--border); border-radius: 8px; }
+.lines .n { flex: 1 1 10rem; font-weight: 500; } .lines > li.missing { border-color: var(--danger); } .lines > li.internal { background: var(--surface2); }
 .picker .row { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .4rem; } .picker .row input { flex: 1 1 12rem; }
 .picklist { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
 .picklist button { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--border); background: var(--surface); padding: .4rem .6rem; cursor: pointer; display: grid; }

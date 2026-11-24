@@ -10,7 +10,7 @@ export default {
   setup() {
     const d = S.state.day;
     const copy = () => S.copyWithToast(C.dayToText(S.config.value.dayTypes.find((t) => t.id === d.dayType).label, S.dayRows.value, S.dayTotals.value, S.dayTarget.value), 'Journée copiée.');
-    return { d, rows: S.dayRows, totals: S.dayTotals, target: S.dayTarget, status: S.profileStatus, dayTypes: S.config.value.dayTypes, factors: S.config.value.portionFactors, kcal: C.fmtKcal, g: C.fmtG, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0), remove: S.removeFromDay, setFactor: S.setDayFactor, release: S.releaseDayFactor, setGlobal: S.setDayGlobal, clear: S.clearDay, copy, profile: () => S.openDialog('profile'), close: () => { S.state.ui.dayOpen = false; }, config: S.config };
+    return { d, rows: S.dayRows, totals: S.dayTotals, target: S.dayTarget, status: S.profileStatus, dayTypes: S.config.value.dayTypes, factors: S.config.value.portionFactors, kcal: C.fmtKcal, g: C.fmtG, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0), remove: S.removeFromDay, sheet: (r) => S.openMealSheet(r.meal.id, r.index), substitute: (r, e) => S.startSubstitution(r.meal, e.index, { where: 'day', index: r.index, mealId: r.meal.id }, r.factor), setFactor: S.setDayFactor, release: S.releaseDayFactor, setGlobal: S.setDayGlobal, clear: S.clearDay, copy, profile: () => S.openDialog('profile'), close: () => { S.state.ui.dayOpen = false; }, config: S.config };
   },
   template: `
     <aside class="myday" aria-labelledby="myday-h">
@@ -28,7 +28,12 @@ export default {
       </div>
       <ul v-if="rows.length" class="dayrows">
         <li v-for="r in rows" :key="r.index">
-          <div class="dayrow-head"><b>{{ r.meal.name }}</b><button type="button" class="icon" @click="remove(r.index)" :aria-label="'Retirer ' + r.meal.name">✕</button></div>
+          <div class="dayrow-head"><b><button type="button" class="linklike dayrow-name" @click="sheet(r)" :title="'Ouvrir la fiche de ' + r.meal.name">{{ r.meal.name }}</button></b><button type="button" class="icon" @click="remove(r.index)" :aria-label="'Retirer ' + r.meal.name">✕</button></div>
+          <div class="dayrow-meta">
+            <span class="badge">{{ r.meal.category }}</span>
+            <span class="dens" :title="'Densité : ' + r.meal.density.label">{{ r.meal.density.emoji }} {{ r.meal.density.label }}</span>
+            <b>{{ kcal(r.meal.totals.kcal * r.factor) }} kcal</b>
+          </div>
           <div class="dayrow-ctl">
             <span class="seg" role="group" :aria-label="'Portion de ' + r.meal.name">
               <button v-for="f in factors" :key="f" type="button" :aria-pressed="r.factor === f" @click="setFactor(r.index, f)">×{{ n(f) }}</button>
@@ -36,9 +41,8 @@ export default {
             <label class="inline"><span class="sr-only">Portion libre</span><input type="number" min="0.1" max="5" step="0.05" :value="r.factor" @change="setFactor(r.index, $event.target.value)"></label>
             <span v-if="r.own" class="badge soft" title="Facteur réglé sur ce repas">fixé</span>
             <button v-if="r.own" type="button" class="icon" @click="release(r.index)" :aria-label="'Revenir au facteur global pour ' + r.meal.name" title="Revenir au facteur global">↺</button>
-            <span class="muted">{{ kcal(r.meal.totals.kcal * r.factor) }} kcal</span>
           </div>
-          <details v-if="r.meal.lines.length"><summary>Ingrédients</summary><ingredient-list :lines="r.meal.lines" :factor="r.factor" /></details>
+          <details v-if="r.meal.lines.length"><summary>Ingrédients</summary><ingredient-list :lines="r.meal.lines" :factor="r.factor" substitutable @substitute="substitute(r, $event)" /></details>
         </li>
       </ul>
       <p v-else class="empty">Ajoute des repas avec « + Ma journée ».</p>

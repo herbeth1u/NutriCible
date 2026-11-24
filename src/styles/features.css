@@ -5,3 +5,34 @@
 .globalfactor label { display: grid; gap: .15rem; flex: 1 1 11rem; font-size: .9rem; }
 .globalfactor b { color: var(--accent); }
 .globalfactor small { flex-basis: 100%; }
+
+/* --- fiche repas en popup, ligne de « Ma journée » */
+.meal-detail > :first-child { margin-top: 0; }
+.dayrow-name { color: var(--text); text-decoration: none; font-weight: 600; text-align: left; }
+.dayrow-name:hover { text-decoration: underline; }
+.dayrow-meta { display: flex; flex-wrap: wrap; gap: .2rem .5rem; align-items: center; margin: .2rem 0; font-size: .9rem; }
+.dayrow-meta .badge { margin-left: 0; }
+.dayrow-meta .dens { font-size: .85rem; }
+.modal-body .badges { margin-top: 0; align-items: center; }
+
+/* --- substitution (bouton ⇄, panneau, liste d'aliments proches) */
+.subbtn { font-size: 1rem; line-height: 1; border: 1px solid var(--border); background: var(--surface); }
+.subbtn[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.ingr li .subbtn { margin-left: auto; min-height: 1.9rem; }
+.subpanel { display: grid; gap: .5rem; }
+.sub-source { margin: 0; padding: .45rem .7rem; border-radius: 8px; background: var(--surface2); }
+.sub-ctl { display: flex; flex-wrap: wrap; gap: .5rem .8rem; align-items: center; }
+.sub-ctl .seg > .muted { padding: 0 .5rem; }
+.sub-ctl .seg button:disabled { opacity: .45; cursor: not-allowed; }
+.sub-search { flex: 1 1 12rem; }
+.subpanel > p { margin: 0; }
+.sublist { list-style: none; margin: 0; padding: 0; max-height: 18rem; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.sublist li { border-bottom: 1px solid var(--border); }
+.sublist li:last-child { border-bottom: 0; }
+.subitem { display: grid; gap: .1rem; width: 100%; text-align: left; border: 0; background: var(--surface); padding: .45rem .7rem; }
+button.subitem { cursor: pointer; }
+button.subitem:hover { background: var(--accent-soft); }
+.subitem small { color: var(--muted); }
+.sub-embedded { display: grid !important; gap: .5rem; background: var(--surface2); border-style: dashed !important; }
+.sub-embedded .btn { justify-self: start; }
+@media (min-width: 1100px) { .sublist { max-height: 22rem; } }
