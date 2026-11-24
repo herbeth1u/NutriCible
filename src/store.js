@@ -8,6 +8,7 @@ import { reactive, computed, watch } from './vue.js';
 import * as C from './calc.js';
 import { EDIT_KEYS, backupFileName, emptyUser, mergeBackup, sanitizeUser, serialize, uid } from './backup.js';
 import { clampFactor, effectiveFactor, emptyDay, sanitizeDay, withGlobal, withMeal, withOwn, withoutOwn } from './day.js';
+import { generateWeek, referenceKcal, regenerateDay, replacePlanMeal, sanitizePlan, setDayType, shoppingToText, viewPlan, weekTypes } from './planner.js';
 import { findIdenticalMeal, substituteItems, variantBase } from './substitute.js';
 import { sanitizeFilters, sanitizeFoodFilters, sanitizeTab } from './prefs.js';
 
@@ -21,13 +22,18 @@ try {
   if (storage) { storage.setItem(`${PREFIX}probe`, '1'); storage.removeItem(`${PREFIX}probe`); }
 } catch { storage = null; }
 
+// Les données utilisateur du stockage (sans « Ma journée » ni le planning, qui ont leur propre clé) : voir emptyUser dans backup.js.
+const emptyStored = () => { const { day, plan, ...rest } = emptyUser(); return rest; };
+
 export const state = reactive({
   ready: false,
   error: '',
   storageOk: !!storage,
   base: { foods: [], internal: [], meals: [], days: [], week: [], config: null },
-  user: emptyUser(),
+  user: emptyStored(),
   day: emptyDay(), // « Ma journée » : { dayType, global, items: [{ meal, base, own? }] } (voir src/day.js)
+  plan: null, // planning de la semaine : { v, seed, days: [{ label, dayType, seed, meals: [[créneau, idRepas]] }] } (voir src/planner.js)
+  planUndo: null, // un niveau d'annulation, en mémoire seulement : { plan, label }
   theme: 'auto',
   ui: { tab: 'meals', dialogs: [], dayOpen: false, filters: C.defaultFilters(), foodFilters: { q: '', types: [], seasons: [], origins: [], usage: '', sort: 'name', dir: 1 }, toast: '' },
 });
@@ -62,6 +68,13 @@ export const dayRows = computed(() => state.day.items.map((it, index) => ({ ...i
 export const dayTotals = computed(() => C.dayTotals(state.day.items.map((it) => ({ meal: it.meal, factor: effectiveFactor(it, state.day.global) })), mealIdx.value).totals);
 export const dayTarget = computed(() => targets.value?.[state.day.dayType] ?? null);
 export const foodTypes = computed(() => config.value?.foodTypes ?? []);
+/** Contexte du planificateur : repas résolus, config, cibles (null sans profil), semaine type, kcal de référence des journées types. */
+export const plannerCtx = computed(() => ({
+  meals: meals.value, mealIdx: mealIdx.value, config: config.value, targets: targets.value,
+  week: weekTypes(state.base.week, state.base.days), reference: referenceKcal(state.base.days, mealIdx.value),
+}));
+/** Planning lu : jours, budgets, facteurs, bilan, avertissements, liste de courses (tout est recalculé, rien n'est stocké). */
+export const planView = computed(() => (state.plan && config.value ? viewPlan(plannerCtx.value, state.plan) : null));
 
 // ------------------------------------------------------------------ interface
 let toastTimer;
@@ -153,8 +166,11 @@ export const findIdentical = (def) => findIdenticalMeal(def, meals.value);
 // Actions de repas partagées par la carte, la fiche en popup et le planificateur. Elles s'empilent sur la boîte ouverte.
 export const duplicateMeal = (m) => pushDialog('meal', { draft: duplicateDraft(m), mode: 'duplicate' });
 export const editMeal = (m) => pushDialog('meal', { draft: { ...duplicateDraft(m), id: m.id, name: m.name }, mode: 'edit' });
-/** Fiche complète d'un repas en popup ; `dayIndex` = sa ligne dans « Ma journée » (portion, retrait, remplacement). */
-export const openMealSheet = (mealId, dayIndex = null) => pushDialog('mealSheet', { mealId, dayIndex });
+/**
+ * Fiche complète d'un repas en popup ; `dayIndex` = sa ligne dans « Ma journée » (portion, retrait, remplacement).
+ * Hors « Ma journée » (planificateur) : `portion` = facteur à afficher, `replaceWhere` = où mettre une variante (voir `applyReplace`).
+ */
+export const openMealSheet = (mealId, dayIndex = null, { portion = null, replaceWhere = null } = {}) => pushDialog('mealSheet', { mealId, dayIndex, portion, replaceWhere });
 /**
  * Ouvre le panneau de substitution pour l'aliment n° `foodIndex` (parmi les aliments, hors ingrédients internes) d'un repas.
  * `replace` : où mettre la variante à l'enregistrement (voir `applyReplace`), ou null pour seulement l'enregistrer.
@@ -255,11 +271,17 @@ export function replaceInDay(index, fromMealId, toMealId) {
   Object.assign(state.day, withMeal(state.day, i, toMealId));
   return true;
 }
-/** Met la variante à la place du repas là où la substitution a été lancée (`replace` : { where: 'day', index, mealId }). */
+/**
+ * Met la variante à la place du repas là où la substitution a été lancée :
+ * `replace` = { where: 'day', index, mealId } (« Ma journée ») ou { where: 'plan', day, mealId } (planificateur).
+ */
 export function applyReplace(replace, toMealId) {
   if (replace?.where === 'day') return replaceInDay(replace.index, replace.mealId, toMealId);
+  if (replace?.where === 'plan') return replaceInPlan(replace.day, replace.mealId, toMealId);
   return false;
 }
+/** Où la variante est mise, pour les messages (« dans Ma journée », « dans le planning »). */
+export const replaceLabel = (replace) => (replace?.where === 'plan' ? 'le planning' : 'Ma journée');
 export const setDayFactor = (index, factor) => { if (Number.isFinite(+factor) && +factor > 0) Object.assign(state.day, withOwn(state.day, index, factor)); };
 export const releaseDayFactor = (index) => { Object.assign(state.day, withoutOwn(state.day, index)); };
 export const setDayGlobal = (g) => { Object.assign(state.day, withGlobal(state.day, g)); };
@@ -273,19 +295,70 @@ export function loadDay(day, factor = 1) {
   state.ui.dayOpen = true;
 }
 
+// ------------------------------------------------------------------ planificateur de semaine
+// Le planning ne stocke que des choix (graines, types de journée, repas) : tout le reste est dérivé (planView).
+// Chaque modification garde la version précédente en mémoire pour un « Annuler » d'un niveau.
+const newSeed = () => Math.floor(Math.random() * 4294967296);
+function commitPlan(next, label) {
+  if (!next || next === state.plan) return false;
+  state.planUndo = state.plan ? { plan: plain(state.plan), label } : null; // la première génération n'a rien à annuler
+  state.plan = next;
+  return true;
+}
+/** Génère une nouvelle semaine. Les types de journée du planning actuel sont gardés ; `reset` revient à la semaine type. */
+export function generatePlan({ reset = false } = {}) {
+  if (!plannerCtx.value.config) return false;
+  const dayTypes = state.plan && !reset ? state.plan.days.map((d) => d.dayType) : null;
+  return commitPlan(generateWeek(plannerCtx.value, { seed: newSeed(), dayTypes }), reset ? 'retour à la semaine type' : 'nouvelle semaine');
+}
+export const regeneratePlanDay = (index) => commitPlan(state.plan && regenerateDay(plannerCtx.value, state.plan, index, { seed: newSeed() }), `régénération du ${state.plan?.days[index]?.label ?? 'jour'}`.toLowerCase());
+export const setPlanDayType = (index, dayTypeId) => commitPlan(state.plan && setDayType(plannerCtx.value, state.plan, index, dayTypeId, { seed: newSeed() }), `changement de type du ${state.plan?.days[index]?.label ?? 'jour'}`.toLowerCase());
+/** Remplace un repas du planning par une variante (même créneau). */
+export function replaceInPlan(dayIndex, fromMealId, toMealId) {
+  const m = mealIdx.value.get(toMealId);
+  if (!state.plan || !m || m.incomplete) return false;
+  const next = replacePlanMeal(state.plan, dayIndex, fromMealId, toMealId);
+  return next !== state.plan && commitPlan(next, 'remplacement d\'un repas');
+}
+/** Annule la dernière modification du planning (un seul niveau). */
+export function undoPlan() {
+  if (!state.planUndo) return false;
+  state.plan = state.planUndo.plan;
+  state.planUndo = null;
+  return true;
+}
+/** Met un jour du planning dans « Ma journée » (type de journée, repas et facteur de portion du jour) : remplace son contenu. */
+export function addPlanDayToMyDay(index) {
+  const d = planView.value?.days[index];
+  const items = d ? d.items.filter((it) => it.meal && !it.meal.incomplete).map((it) => [it.id, 1]) : [];
+  if (!items.length) return false;
+  loadDay({ dayType: d.dayType.id, items }, d.factor);
+  return true;
+}
+export const copyShoppingList = () => planView.value && copyWithToast(shoppingToText(planView.value.shopping), 'Liste de courses copiée.');
+
 // ------------------------------------------------------------------ sauvegarde et restauration
 const plain = (x) => JSON.parse(JSON.stringify(x));
-export const exportBackup = () => downloadFile(backupFileName(), serialize(plain(state.user)), 'application/json');
+// Format 2 : la sauvegarde contient aussi « Ma journée » et le planning (voir src/backup.js).
+const snapshot = () => ({ ...plain(state.user), day: plain(state.day), plan: plain(state.plan) });
+export const exportBackup = () => downloadFile(backupFileName(), serialize(snapshot()), 'application/json');
 
 export function restoreBackup(incoming, strategy) {
   const reserved = { foods: new Set(state.base.foods.map((f) => C.normalize(f.name))), meals: new Set(state.base.meals.map((m) => C.normalize(m.name))) };
-  const { user, report } = mergeBackup(plain(state.user), incoming, strategy, reserved);
-  Object.assign(state.user, user);
+  const { user, report } = mergeBackup(snapshot(), plain(incoming), strategy, reserved); // plain : `incoming` vient d'un état réactif, que structuredClone ne copie pas
+  const { day, plan, ...rest } = user;
+  Object.assign(state.user, rest);
+  const dayTypeIds = (state.base.config?.dayTypes ?? []).map((t) => t.id);
+  // null = la sauvegarde n'en contient pas (format 1, ou pas de planning) : on garde l'actuel. Objet day.js : mêmes références (Ma journée le lit).
+  if (day) Object.assign(state.day, sanitizeDay(day, dayTypeIds));
+  const restored = plan ? sanitizePlan(plan, { dayTypeIds }) : null;
+  if (restored) { state.plan = restored; state.planUndo = null; }
   return report;
 }
 
 // ------------------------------------------------------------------ initialisation
-const fetchJson = (name) => fetch(`./data/${name}.json`).then((r) => { if (!r.ok) throw new Error(`data/${name}.json : HTTP ${r.status}`); return r.json(); });
+// `no-cache` : le navigateur revalide les fichiers de data/ à chaque chargement (sinon une ancienne copie en cache, p. ex. un config.json sans planner, peut être servie).
+const fetchJson = (name) => fetch(`./data/${name}.json`, { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error(`data/${name}.json : HTTP ${r.status}`); return r.json(); });
 
 const readDay = () => sanitizeDay(readKey('day', null), (state.base.config?.dayTypes ?? []).map((t) => t.id));
 
@@ -293,8 +366,10 @@ export async function init(load = fetchJson) {
   try {
     const [foodsJson, internal, mealsJson, days, cfg] = await Promise.all(['foods', 'internal-ingredients', 'meals', 'days', 'config'].map(load));
     state.base = { foods: foodsJson.foods, internal: internal.ingredients, meals: mealsJson.meals, days: days.days, week: days.week, config: cfg };
-    state.user = sanitizeUser(Object.fromEntries(USER_KEYS.map((k) => [k, readKey(k, undefined)])));
+    const { day: _day, plan: _plan, ...stored } = sanitizeUser(Object.fromEntries(USER_KEYS.map((k) => [k, readKey(k, undefined)])));
+    state.user = stored;
     state.day = readDay();
+    state.plan = sanitizePlan(readKey('plan', null), { dayTypeIds: cfg.dayTypes.map((t) => t.id) });
     // Préférences d'interface : revalidées à la lecture (le contenu de data/ ou les aliments ont pu changer).
     Object.assign(state.ui.filters, sanitizeFilters(readKey('filters', null), { config: cfg, foodIds: [...foodIdx.value.keys()] }));
     Object.assign(state.ui.foodFilters, sanitizeFoodFilters(readKey('foodFilters', null), cfg));
@@ -304,6 +379,7 @@ export async function init(load = fetchJson) {
     writeKey('format', FORMAT_VERSION);
     for (const k of USER_KEYS) watch(() => state.user[k], (v) => writeKey(k, v), { deep: true });
     watch(() => state.day, (v) => writeKey('day', v), { deep: true });
+    watch(() => state.plan, (v) => writeKey('plan', v), { deep: true });
     watch(() => state.ui.filters, (v) => writeKey('filters', v), { deep: true });
     watch(() => state.ui.foodFilters, (v) => writeKey('foodFilters', v), { deep: true });
     watch(() => state.ui.tab, (v) => writeKey('tab', v));

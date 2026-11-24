@@ -12,13 +12,16 @@ export default {
   props: {
     mealId: { type: String, required: true },
     dayIndex: { type: Number, default: null }, // ligne de « Ma journée » d'où vient la fiche (portion, retrait, remplacement)
+    // Fiche ouverte hors de « Ma journée » (planificateur) : portion affichée, et où mettre une variante (voir store.applyReplace).
+    portion: { type: Number, default: null },
+    replaceWhere: { type: Object, default: null },
   },
   emits: ['close'],
   setup(props, { emit }) {
     const meal = computed(() => S.mealIdx.value.get(props.mealId) ?? null);
     const row = computed(() => (props.dayIndex === null ? null : S.dayRows.value.find((r) => r.index === props.dayIndex && r.meal.id === props.mealId) ?? null));
-    const factor = computed(() => row.value?.factor ?? 1);
-    const replace = computed(() => (row.value ? { where: 'day', index: row.value.index, mealId: props.mealId } : null));
+    const factor = computed(() => row.value?.factor ?? props.portion ?? 1);
+    const replace = computed(() => (row.value ? { where: 'day', index: row.value.index, mealId: props.mealId } : props.replaceWhere));
     watch(meal, (m) => { if (!m) emit('close'); });
     watch(() => props.dayIndex !== null && !row.value, (gone) => { if (gone) emit('close'); });
     const copy = () => S.copyWithToast(C.mealToText(meal.value), 'Repas copié.');

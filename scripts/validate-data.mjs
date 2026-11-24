@@ -172,6 +172,42 @@ export function validateData({ foods, internal, meals, days, config }) {
   if (!Array.isArray(days.week) || days.week.length !== 7) err('days.json : la semaine type doit contenir 7 jours');
   for (const w of days.week ?? []) if (!dayIds.has(w.day)) err(`semaine type : journée « ${w.day} » inconnue`);
 
+  // --- planificateur de semaine (config.planner)
+  const pl = config.planner;
+  if (!pl) err('config : bloc « planner » manquant');
+  else {
+    const dayTypeIds = dayTypes.map((d) => d.id);
+    const outingIds = (config.outings ?? []).map((o) => o.id);
+    for (const key of ['rest', 'outing']) if (!pl.slots?.[key]) err(`config.planner.slots : liste « ${key} » manquante`);
+    for (const [key, list] of Object.entries(pl.slots ?? {})) {
+      if (key !== 'rest' && key !== 'outing' && !dayTypeIds.includes(key)) err(`config.planner.slots : « ${key} » n'est ni « rest », ni « outing », ni un type de journée`);
+      if (!Array.isArray(list) || !list.length) err(`config.planner.slots.${key} : liste vide`);
+      for (const c of list ?? []) if (!cats.includes(c)) err(`config.planner.slots.${key} : catégorie « ${c} » inconnue`);
+    }
+    for (const id of dayTypeIds) {
+      const list = pl.contexts?.[id];
+      if (!Array.isArray(list) || !list.length) err(`config.planner.contexts : contextes manquants pour le type de journée « ${id} »`);
+      for (const c of list ?? []) if (!ctxs.includes(c)) err(`config.planner.contexts.${id} : contexte « ${c} » inconnu`);
+    }
+    for (const id of Object.keys(pl.contexts ?? {})) if (!dayTypeIds.includes(id)) err(`config.planner.contexts : type de journée « ${id} » inconnu`);
+    for (const id of pl.fixedDayTypes ?? []) if (!dayTypeIds.includes(id)) err(`config.planner.fixedDayTypes : type de journée « ${id} » inconnu`);
+    const r = pl.rules ?? {};
+    if (!ftypes.includes(r.legumeType)) err(`config.planner.rules.legumeType : type d'aliment « ${r.legumeType} » inconnu`);
+    if (!mtags.includes(r.offalTag)) err(`config.planner.rules.offalTag : tag « ${r.offalTag} » inconnu`);
+    if (!Number.isInteger(r.maxOffalPerWeek) || r.maxOffalPerWeek < 0) err('config.planner.rules.maxOffalPerWeek : entier positif ou nul attendu');
+    if (!r.salmonFoods?.length) err('config.planner.rules.salmonFoods : liste vide');
+    for (const [label, list] of Object.entries({ 'salmonFoods': r.salmonFoods, 'milkCocoa.milk': r.milkCocoa?.milk, 'milkCocoa.cocoa': r.milkCocoa?.cocoa })) {
+      if (!Array.isArray(list)) { err(`config.planner.rules.${label} : liste attendue`); continue; }
+      for (const id of list) if (!foodIds.has(id)) err(`config.planner.rules.${label} : aliment « ${id} » inconnu`);
+    }
+    for (const o of r.milkCocoa?.outings ?? []) if (!outingIds.includes(o)) err(`config.planner.rules.milkCocoa.outings : sortie « ${o} » inconnue`);
+    if (!Number.isInteger(pl.attempts) || pl.attempts < 1) err('config.planner.attempts : entier ≥ 1 attendu');
+    if (!isNum(pl.floor) || pl.floor <= 0 || pl.floor > 1) err('config.planner.floor : entre 0 (exclu) et 1 attendu');
+    if (!isNum(pl.step) || pl.step <= 0 || pl.step > 0.5) err('config.planner.step : entre 0 (exclu) et 0,5 attendu');
+    for (const k of ['gapWarning', 'balanceTolerance']) if (!isNum(pl[k]) || pl[k] <= 0) err(`config.planner.${k} : nombre positif attendu`);
+    for (const k of ['protein', 'fiber']) if (!isNum(pl.score?.[k]) || pl.score[k] < 0) err(`config.planner.score.${k} : nombre positif ou nul attendu`);
+  }
+
   return { errors, warnings };
 }
 
