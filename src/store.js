@@ -7,7 +7,8 @@
 import { reactive, computed, watch } from './vue.js';
 import * as C from './calc.js';
 import { EDIT_KEYS, backupFileName, emptyUser, mergeBackup, sanitizeUser, serialize, uid } from './backup.js';
-import { clampFactor, effectiveFactor, emptyDay, sanitizeDay, withGlobal, withOwn, withoutOwn } from './day.js';
+import { clampFactor, effectiveFactor, emptyDay, sanitizeDay, withGlobal, withMeal, withOwn, withoutOwn } from './day.js';
+import { findIdenticalMeal, substituteItems, variantBase } from './substitute.js';
 import { sanitizeFilters, sanitizeFoodFilters, sanitizeTab } from './prefs.js';
 
 export const PREFIX = 'nutricible:v1:';
@@ -28,7 +29,7 @@ export const state = reactive({
   user: emptyUser(),
   day: emptyDay(), // « Ma journée » : { dayType, global, items: [{ meal, base, own? }] } (voir src/day.js)
   theme: 'auto',
-  ui: { tab: 'meals', dialog: null, dayOpen: false, filters: C.defaultFilters(), foodFilters: { q: '', types: [], seasons: [], origins: [], usage: '', sort: 'name', dir: 1 }, toast: '' },
+  ui: { tab: 'meals', dialogs: [], dayOpen: false, filters: C.defaultFilters(), foodFilters: { q: '', types: [], seasons: [], origins: [], usage: '', sort: 'name', dir: 1 }, toast: '' },
 });
 
 const readKey = (k, fallback) => {
@@ -65,8 +66,19 @@ export const foodTypes = computed(() => config.value?.foodTypes ?? []);
 // ------------------------------------------------------------------ interface
 let toastTimer;
 export const setTab = (t) => { state.ui.tab = t; };
-export const openDialog = (name, props = {}) => { state.ui.dialog = { name, props }; };
-export const closeDialog = () => { state.ui.dialog = null; };
+// Boîtes de dialogue : une pile (la dernière est au premier plan). `openDialog` repart d'une pile vide ;
+// `pushDialog` empile par-dessus (la fermer revient à la précédente) ; `replaceDialog` remplace celle du dessus.
+let dialogSeq = 0;
+const dialogEntry = (name, props) => ({ id: (dialogSeq += 1), name, props });
+export const openDialog = (name, props = {}) => { state.ui.dialogs = [dialogEntry(name, props)]; };
+export const pushDialog = (name, props = {}) => { state.ui.dialogs.push(dialogEntry(name, props)); };
+export const replaceDialog = (name, props = {}) => { state.ui.dialogs.splice(Math.max(0, state.ui.dialogs.length - 1), 1, dialogEntry(name, props)); };
+/** Ferme la boîte `id`, ou celle du dessus. */
+export const closeDialog = (id) => {
+  const i = id === undefined ? state.ui.dialogs.length - 1 : state.ui.dialogs.findIndex((d) => d.id === id);
+  if (i >= 0) state.ui.dialogs.splice(i, 1);
+};
+export const closeAllDialogs = () => { state.ui.dialogs = []; };
 export function toast(msg) {
   state.ui.toast = msg;
   clearTimeout(toastTimer);
@@ -126,6 +138,28 @@ export function duplicateDraft(m) {
     internal: m.lines.filter((l) => l.kind === 'internal').map((l) => [l.id, l.qty]),
   };
 }
+
+/** Brouillon de variante : le repas dupliqué, avec l'aliment de la ligne `foodIndex` (parmi les aliments) remplacé. */
+export function substitutionDraft(m, foodIndex, foodId, qty) {
+  const d = duplicateDraft(m);
+  d.items = substituteItems(d.items, foodIndex, foodId, qty);
+  d.name = uniqueMealName(`${variantBase(m.name)} (variante)`);
+  return d;
+}
+
+/** Repas déjà présent (recueil ou perso) dont la composition est identique à celle du brouillon. */
+export const findIdentical = (def) => findIdenticalMeal(def, meals.value);
+
+// Actions de repas partagées par la carte, la fiche en popup et le planificateur. Elles s'empilent sur la boîte ouverte.
+export const duplicateMeal = (m) => pushDialog('meal', { draft: duplicateDraft(m), mode: 'duplicate' });
+export const editMeal = (m) => pushDialog('meal', { draft: { ...duplicateDraft(m), id: m.id, name: m.name }, mode: 'edit' });
+/** Fiche complète d'un repas en popup ; `dayIndex` = sa ligne dans « Ma journée » (portion, retrait, remplacement). */
+export const openMealSheet = (mealId, dayIndex = null) => pushDialog('mealSheet', { mealId, dayIndex });
+/**
+ * Ouvre le panneau de substitution pour l'aliment n° `foodIndex` (parmi les aliments, hors ingrédients internes) d'un repas.
+ * `replace` : où mettre la variante à l'enregistrement (voir `applyReplace`), ou null pour seulement l'enregistrer.
+ */
+export const startSubstitution = (m, foodIndex, replace = null, factor = 1) => pushDialog('substitute', { mealId: m.id, foodIndex, replace, factor });
 
 export function saveMeal(def) {
   const clean = { ...def, id: def.id ?? uid('meal'), items: def.items.map(([id, g]) => [id, +g]), internal: (def.internal ?? []).map(([id, g]) => [id, +g]) };
@@ -209,6 +243,23 @@ export function addToDay(mealId, factor = 1) {
   return true;
 }
 export const removeFromDay = (index) => { state.day.items.splice(index, 1); };
+/**
+ * Remplace le repas d'une ligne de « Ma journée » (variante), avec le même facteur. La ligne est retrouvée par son
+ * indice, ou à défaut par le repas d'origine ; sans correspondance (ou repas incomplet), rien ne change.
+ */
+export function replaceInDay(index, fromMealId, toMealId) {
+  const m = mealIdx.value.get(toMealId);
+  if (!m || m.incomplete) return false;
+  const i = state.day.items[index]?.meal === fromMealId ? index : state.day.items.findIndex((it) => it.meal === fromMealId);
+  if (i < 0) return false;
+  Object.assign(state.day, withMeal(state.day, i, toMealId));
+  return true;
+}
+/** Met la variante à la place du repas là où la substitution a été lancée (`replace` : { where: 'day', index, mealId }). */
+export function applyReplace(replace, toMealId) {
+  if (replace?.where === 'day') return replaceInDay(replace.index, replace.mealId, toMealId);
+  return false;
+}
 export const setDayFactor = (index, factor) => { if (Number.isFinite(+factor) && +factor > 0) Object.assign(state.day, withOwn(state.day, index, factor)); };
 export const releaseDayFactor = (index) => { Object.assign(state.day, withoutOwn(state.day, index)); };
 export const setDayGlobal = (g) => { Object.assign(state.day, withGlobal(state.day, g)); };
