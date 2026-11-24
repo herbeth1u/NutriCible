@@ -25,12 +25,13 @@ export const effectiveFactor = (item, global = 1) => (Number.isFinite(item.own) 
 /**
  * Relit une journée enregistrée. Accepte l'ancien format (items { meal, factor }, sans facteur global).
  * @param {any} raw
- * @param {string[]} dayTypeIds
+ * @param {string[]} [dayTypeIds] types de journée connus ; sans liste (lecture d'une sauvegarde, avant le chargement de la
+ *   config), tout texte est accepté et le type est revalidé au chargement dans l'application.
  */
 export function sanitizeDay(raw, dayTypeIds) {
   const d = emptyDay();
   if (!raw || typeof raw !== 'object') return d;
-  if (dayTypeIds.includes(raw.dayType)) d.dayType = raw.dayType;
+  if (dayTypeIds ? dayTypeIds.includes(raw.dayType) : typeof raw.dayType === 'string' && raw.dayType) d.dayType = raw.dayType;
   if (Number.isFinite(raw.global)) d.global = clampFactor(raw.global);
   for (const it of Array.isArray(raw.items) ? raw.items : []) {
     if (!it || typeof it.meal !== 'string') continue;

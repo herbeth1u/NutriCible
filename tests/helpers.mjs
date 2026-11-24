@@ -1,7 +1,8 @@
 // tests/helpers.mjs — utilitaires partagés (ce fichier n'est pas un test).
 // ATTENTION : les tests utilisent exclusivement des profils FICTIFS.
 import { loadData } from '../scripts/validate-data.mjs';
-import { buildFoodIndex, resolveMeal } from '../src/calc.js';
+import { allTargets, buildFoodIndex, resolveMeal } from '../src/calc.js';
+import { referenceKcal, weekTypes } from '../src/planner.js';
 
 /** Profil fictif (aucune personne réelle). */
 export const FICTIVE = { sex: 'M', age: 30, heightCm: 180, weightKg: 75, weightMinKg: null, weightMaxKg: null, restingKcal: null, longActiveKcal: null };
@@ -18,4 +19,9 @@ export async function world(overrides = {}) {
   const ctx = { foodIdx, internalIdx, config: d.config, repl: overrides.repl };
   const meals = d.meals.meals.map((m) => resolveMeal({ ...m, origin: 'recueil' }, ctx));
   return { ...d, internal, foodIdx, internalIdx, ctx, meals, mealIdx: new Map(meals.map((m) => [m.id, m])) };
+}
+
+/** Contexte du planificateur (profil fictif ; `profile: null` = profil vide, sans cibles). `meals` : repas à utiliser à la place de ceux du recueil. */
+export function plannerCtx(w, profile = FICTIVE, { meals = w.meals } = {}) {
+  return { meals, mealIdx: new Map(meals.map((m) => [m.id, m])), config: w.config, targets: profile ? allTargets(profile, w.config) : null, week: weekTypes(w.days.week, w.days.days), reference: referenceKcal(w.days.days, w.mealIdx) };
 }
