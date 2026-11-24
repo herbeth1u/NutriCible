@@ -13,16 +13,19 @@ import FoodFormDialog from './FoodFormDialog.js';
 import FoodDeleteDialog from './FoodDeleteDialog.js';
 import ExportDialog from './ExportDialog.js';
 import BackupDialog from './BackupDialog.js';
+import MealSheetDialog from './MealSheetDialog.js';
+import SubstituteDialog from './SubstituteDialog.js';
 
 const TABS = [['meals', 'Repas'], ['days', 'Journées types'], ['targets', 'Cibles et hypothèses'], ['subs', 'Substitutions et ajustements'], ['foods', 'Aliments']];
 const VIEWS = { meals: 'meals-tab', days: 'days-tab', targets: 'targets-tab', subs: 'substitutions-tab', foods: 'foods-tab' };
-const DIALOGS = { profile: ProfileDialog, meal: MealFormDialog, food: FoodFormDialog, foodDelete: FoodDeleteDialog, export: ExportDialog, backup: BackupDialog };
+const DIALOGS = { profile: ProfileDialog, meal: MealFormDialog, food: FoodFormDialog, foodDelete: FoodDeleteDialog, export: ExportDialog, backup: BackupDialog, mealSheet: MealSheetDialog, substitute: SubstituteDialog };
 const THEMES = { auto: ['🌓', 'automatique'], dark: ['🌙', 'sombre'], light: ['☀️', 'clair'] };
 
 export default {
   components: { MealsTab, DaysTab, TargetsTab, SubstitutionsTab, FoodsTab, MyDayPanel },
   setup() {
-    const dlg = computed(() => S.state.ui.dialog);
+    // Pile de boîtes de dialogue : la dernière est au premier plan, les précédentes restent montées dessous.
+    const dialogs = computed(() => S.state.ui.dialogs.map((d) => ({ id: d.id, comp: DIALOGS[d.name], props: d.props })));
     const onTabKey = (e) => {
       const i = TABS.findIndex((t) => t[0] === S.state.ui.tab);
       const next = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : null;
@@ -34,8 +37,7 @@ export default {
     };
     return {
       state: S.state, tabs: TABS, views: VIEWS, status: S.profileStatus, count: computed(() => S.state.day.items.length),
-      dlgComp: computed(() => (dlg.value ? DIALOGS[dlg.value.name] : null)), dlgProps: computed(() => dlg.value?.props ?? {}),
-      dlgKey: computed(() => (dlg.value ? JSON.stringify([dlg.value.name, dlg.value.props.foodId ?? null, dlg.value.props.draft?.id ?? null, dlg.value.props.mode ?? null]) : '')),
+      dialogs,
       open: S.openDialog, close: S.closeDialog, setTab: S.setTab, cycle: S.cycleTheme, onTabKey, themeIcon: computed(() => THEMES[S.state.theme][0]), themeName: computed(() => THEMES[S.state.theme][1]),
       toggleDay: () => { S.state.ui.dayOpen = !S.state.ui.dayOpen; },
     };
@@ -68,7 +70,7 @@ export default {
         </div>
       </template>
 
-      <component v-if="dlgComp" :is="dlgComp" :key="dlgKey" v-bind="dlgProps" @close="close" />
+      <component v-for="d in dialogs" :is="d.comp" :key="d.id" v-bind="d.props" @close="close(d.id)" />
       <div v-if="state.ui.toast" class="toast" role="status" aria-live="polite">{{ state.ui.toast }}</div>
     </div>`,
 };
