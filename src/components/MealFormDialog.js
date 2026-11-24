@@ -56,7 +56,7 @@ export default {
       const t = twin.value;
       if (!t) return;
       if (target.value && S.applyReplace(target.value, t.id)) {
-        S.toast(`« ${t.name} » existe déjà : il remplace « ${source.value.name} » dans Ma journée.`);
+        S.toast(`« ${t.name} » existe déjà : il remplace « ${source.value.name} » dans ${S.replaceLabel(target.value)}.`);
         S.closeAllDialogs();
       } else {
         S.closeAllDialogs();
@@ -70,7 +70,7 @@ export default {
       const id = S.saveMeal(def());
       if (props.substitution) {
         const replaced = !!target.value && S.applyReplace(target.value, id);
-        S.toast(replaced ? `Variante « ${name} » enregistrée : elle remplace « ${source.value.name} » dans Ma journée.` : `Variante « ${name} » ajoutée à ta bibliothèque.`);
+        S.toast(replaced ? `Variante « ${name} » enregistrée : elle remplace « ${source.value.name} » dans ${S.replaceLabel(target.value)}.` : `Variante « ${name} » ajoutée à ta bibliothèque.`);
         S.closeAllDialogs();
         return;
       }
@@ -78,7 +78,7 @@ export default {
       emit('close');
     };
     const title = { create: 'Créer mon repas', edit: 'Modifier mon repas', duplicate: 'Dupliquer ce repas' }[props.mode];
-    return { cfg, d, lines, internal, disp, food, stateOf, shown, setQty, portions, setPortions, add, toggle, removeLine, subOpen, toggleSub, pickSub, source, target, twin, useTwin, preview, errors, save, title, kcal: C.fmtKcal, g: C.fmtG, unitOf: C.unitOf, nameOf: (id) => S.internalIdx.value.get(id)?.name ?? id };
+    return { cfg, d, lines, internal, disp, food, stateOf, shown, setQty, portions, setPortions, add, toggle, removeLine, subOpen, toggleSub, pickSub, source, target, replaceLabel: computed(() => S.replaceLabel(target.value)), twin, useTwin, preview, errors, save, title, kcal: C.fmtKcal, g: C.fmtG, unitOf: C.unitOf, nameOf: (id) => S.internalIdx.value.get(id)?.name ?? id };
   },
   template: `
     <modal :title="title" wide @close="$emit('close')">
@@ -95,7 +95,7 @@ export default {
           <button v-for="t in cfg.manualTags" :key="t" type="button" class="pill" :class="{ on: d.tags.includes(t) }" :aria-pressed="d.tags.includes(t)" @click="toggle(d.tags, t)">{{ t }}</button>
         </fieldset>
 
-        <p v-if="source" class="notice small">Variante préremplie à partir de « {{ source.name }} ». Utilise ⇄ sur une ligne pour substituer d'autres aliments avant d'enregistrer.<template v-if="target"> À l'enregistrement, elle remplace « {{ source.name }} » dans Ma journée, avec la même portion.</template> Si tu fermes cette fenêtre, rien ne change.</p>
+        <p v-if="source" class="notice small">Variante préremplie à partir de « {{ source.name }} ». Utilise ⇄ sur une ligne pour substituer d'autres aliments avant d'enregistrer.<template v-if="target"> À l'enregistrement, elle remplace « {{ source.name }} » dans {{ replaceLabel }}<template v-if="target.where === 'plan'"> (les portions du jour sont recalculées)</template><template v-else>, avec la même portion</template>.</template> Si tu fermes cette fenêtre, rien ne change.</p>
         <h3>Ingrédients</h3>
         <ul class="lines">
           <template v-for="(l, i) in lines" :key="i">
