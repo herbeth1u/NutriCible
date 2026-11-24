@@ -36,3 +36,19 @@ button.subitem:hover { background: var(--accent-soft); }
 .sub-embedded { display: grid !important; gap: .5rem; background: var(--surface2); border-style: dashed !important; }
 .sub-embedded .btn { justify-self: start; }
 @media (min-width: 1100px) { .sublist { max-height: 22rem; } }
+
+/* --- planificateur de semaine */
+.plan-actions { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; margin: .7rem 0; }
+.plan-day { margin-top: .7rem; }
+.plan-day .card-top { align-items: center; flex-wrap: wrap; }
+.plan-type select { min-height: 2.1rem; padding: .25rem .5rem; }
+.plan-day .daytable td { white-space: nowrap; }
+.plan-day .daytable th { text-align: left; }
+.plan-meta { margin: .4rem 0 0; }
+.plan-warn { list-style: none; margin: .4rem 0; padding: 0; display: grid; gap: .3rem; }
+.plan-warn .notice { margin: 0; }
+.plan-summary, .plan-shop { margin-top: .9rem; }
+.shop-group h4 { margin: .8rem 0 .25rem; font-size: .95rem; }
+.shoplist { list-style: none; margin: 0; padding: 0; columns: 2 15rem; column-gap: 1.5rem; }
+.shoplist li { break-inside: avoid; padding: .12rem 0; }
+.shoplist .q { display: inline-block; min-width: 4.8rem; font-weight: 600; font-variant-numeric: tabular-nums; }

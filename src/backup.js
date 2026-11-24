@@ -5,11 +5,15 @@
 // Pour faire évoluer le format : incrémenter FORMAT et ajouter une migration (n → n+1) dans MIGRATIONS.
 
 import { emptyProfile, normalize } from './calc.js';
+import { sanitizeDay } from './day.js';
+import { sanitizePlan } from './planner.js';
 
 export const APP = 'NutriCible';
-export const FORMAT = 1;
+// Format 2 : la sauvegarde contient aussi « Ma journée » (`day`) et le planning de la semaine (`plan`).
+// `day` et `plan` valent null quand la sauvegarde n'en contient pas (fichier de format 1, ou pas de planning généré) : rien à restaurer.
+export const FORMAT = 2;
 
-export const emptyUser = () => ({ profile: emptyProfile(), meals: [], foods: [], foodEdits: {}, deletedFoods: [], replacements: {} });
+export const emptyUser = () => ({ profile: emptyProfile(), meals: [], foods: [], foodEdits: {}, deletedFoods: [], replacements: {}, day: null, plan: null });
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -81,12 +85,15 @@ export function sanitizeUser(raw) {
       if (Object.keys(m).length) u.replacements[mealId] = m;
     }
   }
+  u.day = isObj(raw.day) ? sanitizeDay(raw.day) : null; // le type de journée est revalidé au chargement (la config n'est pas connue ici)
+  u.plan = sanitizePlan(raw.plan);
   return u;
 }
 
 /** Migrations successives : MIGRATIONS[n] transforme les données du format n vers n + 1. */
 export const MIGRATIONS = {
   0: (d) => ({ ...d, replacements: d?.replacements ?? {} }),
+  1: (d) => ({ ...d, day: d?.day ?? null, plan: d?.plan ?? null }), // « Ma journée » et planning : absents des sauvegardes de format 1
 };
 
 export function migrate(file) {
@@ -153,6 +160,11 @@ export function mergeBackup(current, incoming, strategy = 'keep', reserved = {})
   for (const f of incoming.foods) take('food', user.foods, f, reservedFoods, 'Foods');
   const remap = (id) => idMap.get(id) ?? id;
   for (const m of incoming.meals) take('meal', user.meals, { ...m, items: m.items.map(([id, g]) => [remap(id), g]) }, reservedMeals, 'Meals');
+
+  // « Ma journée » et planning : suivent les repas renommés ; une sauvegarde qui n'en contient pas (null) ne remplace rien ;
+  // en mode « garder l'existant », l'importé ne prend la place que d'une journée vide ou d'une absence de planning.
+  if (incoming.day && (strategy !== 'keep' || !user.day?.items.length)) user.day = { ...incoming.day, items: incoming.day.items.map((it) => ({ ...it, meal: remap(it.meal) })) };
+  if (incoming.plan && (strategy !== 'keep' || !user.plan)) user.plan = { ...incoming.plan, days: incoming.plan.days.map((d) => ({ ...d, meals: d.meals.map(([slot, id]) => [slot, remap(id)]) })) };
 
   for (const [id, patch] of Object.entries(incoming.foodEdits)) if (strategy !== 'keep' || !(id in user.foodEdits)) user.foodEdits[id] = patch;
   user.deletedFoods = [...new Set([...user.deletedFoods, ...incoming.deletedFoods])];
