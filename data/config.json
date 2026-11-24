@@ -78,5 +78,38 @@
     "seasonal": { "label": "Saisonnier" }
   },
   "portionFactors": [0.75, 1, 1.25],
-  "condiments": ["Jus de citron", "Sel", "Poivre", "Moutarde à l'ancienne", "Paprika", "Curry", "Curcuma", "Cannelle"]
+  "condiments": ["Jus de citron", "Sel", "Poivre", "Moutarde à l'ancienne", "Paprika", "Curry", "Curcuma", "Cannelle"],
+  "planner": {
+    "slots": {
+      "rest": ["Petit-déjeuner", "Déjeuner", "Collation", "Dîner"],
+      "outing": ["Petit-déjeuner", "Déjeuner", "Collation", "Pendant l'effort", "Récupération", "Dîner"],
+      "longue": ["Petit-déjeuner", "Pendant l'effort", "Récupération", "Déjeuner", "Collation", "Dîner"],
+      "cheat": ["Repas plaisir"]
+    },
+    "contexts": {
+      "repos": ["Jour de repos", "Dimanche de récupération"],
+      "courte": ["Sortie courte", "Sortie moyenne", "Jour de repos"],
+      "moyenne": ["Sortie moyenne", "Sortie courte"],
+      "longue": ["Petit-déjeuner de sortie longue", "Sortie longue", "Sortie moyenne", "Sortie courte"],
+      "dimanche": ["Dimanche de récupération", "Jour de repos"],
+      "veille-longue": ["Veille de sortie longue", "Sortie moyenne", "Dimanche de récupération"],
+      "cheat": ["Journée cheat meal"],
+      "veille-plaisir": ["Veille de repas plaisir", "Sortie courte", "Sortie moyenne"],
+      "lendemain-plaisir": ["Lendemain de repas plaisir", "Sortie courte", "Sortie moyenne", "Dimanche de récupération"]
+    },
+    "fixedDayTypes": ["cheat"],
+    "rules": {
+      "legumeType": "Légumineuses",
+      "salmonFoods": ["saumon"],
+      "offalTag": "Abats",
+      "maxOffalPerWeek": 1,
+      "milkCocoa": { "milk": ["lait-demi-ecreme"], "cocoa": ["cacao-sucre"], "outings": ["moyenne", "longue"] }
+    },
+    "attempts": 60,
+    "floor": 0.9,
+    "step": 0.05,
+    "gapWarning": 0.08,
+    "balanceTolerance": 0.02,
+    "score": { "protein": 0.5, "fiber": 0.25 }
+  }
 }
