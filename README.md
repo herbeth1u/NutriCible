@@ -45,6 +45,18 @@ Un **curseur global** (×0,5 à ×2, par pas de 0,05) règle les portions de tou
 
 L'onglet **Cibles et hypothèses** donne un **facteur conseillé par jour** et le bilan hebdomadaire de la semaine type après ajustement : les journées types sont dimensionnées pour un adulte moyen, ce calcul (fait dans ton navigateur, à partir de ton profil) les ramène au maintien.
 
+### Planificateur de semaine
+
+L'onglet **Planificateur** tire au sort une semaine de repas du recueil, selon le type de chaque journée (par défaut, la semaine type) :
+
+- **Budget par jour** : chaque jour a sa dépense (ton profil et les coefficients des types de journée). Le jour du cheat meal est fixe (le repas d'environ 3 000 kcal) ; le reste du budget de la semaine est réparti sur les autres jours, jamais en dessous de 90 % de leur dépense. Un **facteur de portion** global (par pas de 5 %) ramène chaque jour à son budget ; l'écart à la cible est affiché. Sans profil, les repas sont tirés près d'une journée type, avec des portions ×1 et sans budget.
+- **Créneaux et règles** : petit-déjeuner, déjeuner, une collation, effort, récupération, dîner selon le type de journée ; les candidats sont filtrés par contexte. Règles strictes : légumineuses chaque jour, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue, aucun repas répété dans la semaine. Si une règle est impossible à tenir, un avertissement l'indique.
+- **Tirage mémorisé** : « Générer une nouvelle semaine » (avec un « Annuler » d'un niveau), « Regénérer ce jour » (les autres jours ne bougent pas), menu du type de journée (les budgets des autres jours se rééquilibrent), « Ajouter à Ma journée » (remplace le contenu de Ma journée par ce jour, avec son facteur). La graine du tirage est affichée : la même graine redonne la même semaine.
+- **Bilan** : macros, kcal et solde hebdomadaire (apports moins dépense). **Liste de courses** : aliments dédoublonnés, quantités cumulées (portions comprises), regroupés par type, avec « Copier la liste ».
+- Le nom d'un repas ouvre sa fiche ; ⇄ y remplace un aliment, et la variante prend la place du repas dans le planning.
+
+Le planning est enregistré dans le navigateur et dans la sauvegarde JSON.
+
 ### Fiche repas et substitution
 
 - Dans **Ma journée**, le nom d'un repas ouvre sa **fiche complète en popup** : macros (pour la portion de la journée), recette, variante, contextes, switch Cru / Cuit et actions (copier, dupliquer, modifier si le repas est perso, retirer de la journée). La liste de « Ma journée » ne garde que le nom, la catégorie, la densité et les kcal de la portion ; le bouton « Ingrédients » reste plié-déplié.
@@ -59,7 +71,9 @@ Trois termes seulement, d'après les **calories actives** de la montre : **sorti
 
 ## Mes données et la sauvegarde
 
-Tes ajouts et modifications (profil, repas perso, aliments perso, valeurs modifiées des aliments du recueil, aliments supprimés, remplacements, « Ma journée ») sont enregistrés dans le `localStorage` du navigateur sous des clés préfixées `nutricible:v1:` (le domaine GitHub Pages est partagé entre dépôts). Aucun total n'est stocké : tout est recalculé.
+Tes ajouts et modifications (profil, repas perso, aliments perso, valeurs modifiées des aliments du recueil, aliments supprimés, remplacements, « Ma journée », planning de la semaine) sont enregistrés dans le `localStorage` du navigateur sous des clés préfixées `nutricible:v1:` (le domaine GitHub Pages est partagé entre dépôts). Aucun total n'est stocké : tout est recalculé.
+
+La sauvegarde JSON est au **format 2** (elle contient « Ma journée » et le planning) ; les sauvegardes du format 1 se restaurent toujours (migration), sans toucher à « Ma journée » ni au planning.
 
 Pour changer d'appareil ou de navigateur : **Sauvegarde → Sauvegarder mes données (JSON)**, puis **Restaurer** sur l'autre appareil (fusion avec gestion des conflits de noms, ou remplacement complet). Si le stockage du navigateur est indisponible, l'appli reste utilisable en mémoire et un bandeau l'indique.
 
@@ -81,7 +95,7 @@ Tout est dans `data/` (JSON avec `schemaVersion`, identifiants stables, aucun to
 | `internal-ingredients.json` | ingrédients internes des recettes, jamais affichés |
 | `meals.json` | repas du recueil : listes de couples `[identifiant d'aliment, quantité en g]` |
 | `days.json` | journées types (facteurs de portion) et semaine type |
-| `config.json` | catégories, contextes, tags, seuils de densité, règles des tags, coefficients génériques |
+| `config.json` | catégories, contextes, tags, seuils de densité, règles des tags, coefficients génériques, réglages du planificateur (`planner`) |
 
 Après toute modification : `npm run validate` puis `npm test`. Le détail des conventions (ajouter un repas, un aliment, un contexte) est dans `CLAUDE.md`. Pour demander une modification à Claude, décris-la simplement (« ajoute un dîner à base de lentilles corail », « passe le seuil de densité des collations à 250 kcal ») : il modifie par petits changements ciblés et relance les tests.
 
@@ -92,7 +106,7 @@ npm run validate   # validation des données (références, listes, absence de d
 npm test           # tests (lanceur intégré de Node ≥ 20), aucune dépendance
 ```
 
-Les tests couvrent notamment : macros et arrondis, conversion cru/cuit, aliments composés et surcharge, densité par catégorie, tags automatiques (dont « Saisonnier »), métabolisme de base et cibles (profils fictifs), export CSV, sauvegarde et restauration, règles alimentaires sur les données.
+Les tests couvrent notamment : macros et arrondis, conversion cru/cuit, aliments composés et surcharge, densité par catégorie, tags automatiques (dont « Saisonnier »), métabolisme de base et cibles (profils fictifs), export CSV, sauvegarde et restauration (formats 1 et 2), planificateur de semaine (règles, graine, budgets, liste de courses), règles alimentaires sur les données.
 
 ### Vue vendorisée
 
@@ -118,6 +132,7 @@ src/vue.js            point d'entrée unique de Vue
 src/store.js          état, valeurs dérivées, persistance préfixée
 src/calc.js           fonctions pures : une seule fonction de calcul pour tous les repas
 src/substitute.js     substitution d'aliments (aliments proches, quantité équivalente, variante identique)
+src/planner.js        planificateur de semaine (tirage à graine, budgets, règles, liste de courses)
 src/notion-export.js  génération du CSV
 src/backup.js         sauvegarde, restauration, migrations de format
 src/components/       un fichier par onglet et par boîte de dialogue
