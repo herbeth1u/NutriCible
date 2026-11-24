@@ -23,6 +23,7 @@ Le dépôt est public. Ne jamais écrire, nulle part (code, `data/`, `config.jso
 
 ```
 index.html · src/main.js · src/vue.js · src/store.js · src/calc.js · src/notion-export.js · src/backup.js
+src/day.js (modèle de « Ma journée ») · src/prefs.js (filtres, tris et onglet enregistrés) · src/week.js (bilan hebdomadaire en maintien)
 src/components/   un fichier par onglet (MealsTab, DaysTab, TargetsTab, SubstitutionsTab, FoodsTab)
                   et par boîte de dialogue (ProfileDialog, MealFormDialog, FoodFormDialog, FoodDeleteDialog,
                   ExportDialog, BackupDialog) + MyDayPanel, MealCard, IngredientList, FoodPicker, Pills, Bar, Modal, App
@@ -31,6 +32,7 @@ scripts/          validate-data.mjs        tests/  (node --test)        vendor/ 
 ```
 
 - `calc.js` : fonctions pures (aucun DOM, stockage ni Vue) : macros, conversion cru/cuit, aliments composés, densité, tags, filtres, tri, cibles, bilan hebdomadaire.
+- `day.js`, `prefs.js`, `week.js` : fonctions pures, testées dans `tests/state.test.mjs` et `tests/week.test.mjs`. `day.js` : facteur de départ (`base`), facteur propre (`own`) et facteur global d'une journée, règle « le dernier changement l'emporte ». `prefs.js` : toute préférence lue dans le stockage (filtres, tris, onglet) est **revalidée** à la lecture. `week.js` : budget de maintien de chaque jour et facteur de portion conseillé.
 - `store.js` : état Vue réactif, `computed` dérivés, persistance, actions. Les composants lisent le store et n'ont pas de logique métier.
 - Les composants sont des objets avec `template` (compilé dans le navigateur, build ESM avec compilateur).
 
@@ -38,7 +40,7 @@ scripts/          validate-data.mjs        tests/  (node --test)        vendor/ 
 
 - **Aliment** : `id` stable (slug), `name`, `type` (de `config.foodTypes`), `per100` (kcal, protein, carbs, fat, fiber **pour 100 g**, ou 100 ml si `unit: "ml"`), `state` = **état de référence** (celui des valeurs et des quantités des repas), `estimated`, `note`, `portion` ({label, g}), `season` (id de `config.seasons`). Aliment ⇄ (cru et cuit) : `coef` = poids cuit ÷ poids cru, `state` vaut `cru` ou `cuit`, `weigh` = état de pesée habituel. `keepCase: true` pour les noms propres (grammaire de l'export). Aliment composé : `recipe` = `[[id, g], …]` pour 100 g de produit fini, valeurs calculées.
 - **Repas** : `id`, `name` (unique), `category`, `contexts`, `tags` (manuels), `time`, `items` = `[[id d'aliment, g], …]` dans l'état de référence de chaque aliment, `internal` (ingrédients internes), `prep`, `variant`. Bloc cheat meal : `cheat` = macros estimées, sans `items`.
-- **Journée type** : `items` = `[[id de repas, facteur de portion], …]`, `dayType` (de `config.dayTypes`). `week` : la semaine type pour le bilan hebdomadaire.
+- **Journée type** : `items` = `[[id de repas, facteur de portion], …]`, `dayType` (de `config.dayTypes`). **Une seule collation par journée** (le goûter de 16 h, creux le plus long ; aucune le jour du cheat meal) ; la boisson ou le repas de récupération après la sortie n'est pas une collation. `week` : la semaine type pour le bilan hebdomadaire (le lundi est un jour de sortie courte). Les journées sont dimensionnées pour un **profil de référence fictif** (à ±6 % des cibles, vérifié par un test) ; c'est `week.js` qui les ramène au **maintien** pour le vrai profil (facteurs conseillés par jour).
 - Règles automatiques (seuils de densité par catégorie, tags « OK avant effort », « Riche en protéines », « Riche en fibres », « Saisonnier ») : dans `config.json`, affichées dans l'onglet Cibles.
 
 ## Comment faire…
