@@ -24,16 +24,21 @@ Le dépôt est public. Ne jamais écrire, nulle part (code, `data/`, `config.jso
 ```
 index.html · src/main.js · src/vue.js · src/store.js · src/calc.js · src/notion-export.js · src/backup.js
 src/day.js (modèle de « Ma journée ») · src/prefs.js (filtres, tris et onglet enregistrés) · src/week.js (bilan hebdomadaire en maintien)
+src/substitute.js (substitution d'aliments : aliments proches, quantité équivalente, variante identique)
 src/components/   un fichier par onglet (MealsTab, DaysTab, TargetsTab, SubstitutionsTab, FoodsTab)
-                  et par boîte de dialogue (ProfileDialog, MealFormDialog, FoodFormDialog, FoodDeleteDialog,
-                  ExportDialog, BackupDialog) + MyDayPanel, MealCard, IngredientList, FoodPicker, Pills, Bar, Modal, App
+                  et par boîte de dialogue (ProfileDialog, MealFormDialog, MealSheetDialog, SubstituteDialog, FoodFormDialog,
+                  FoodDeleteDialog, ExportDialog, BackupDialog) + MyDayPanel, MealCard, MealDetail, MealMacros,
+                  IngredientList, SubstitutePanel, FoodPicker, Pills, Bar, Modal, App
 data/             foods.json · internal-ingredients.json · meals.json · days.json · config.json
 scripts/          validate-data.mjs        tests/  (node --test)        vendor/  Vue vendorisé
 ```
 
 - `calc.js` : fonctions pures (aucun DOM, stockage ni Vue) : macros, conversion cru/cuit, aliments composés, densité, tags, filtres, tri, cibles, bilan hebdomadaire.
 - `day.js`, `prefs.js`, `week.js` : fonctions pures, testées dans `tests/state.test.mjs` et `tests/week.test.mjs`. `day.js` : facteur de départ (`base`), facteur propre (`own`) et facteur global d'une journée, règle « le dernier changement l'emporte ». `prefs.js` : toute préférence lue dans le stockage (filtres, tris, onglet) est **revalidée** à la lecture. `week.js` : budget de maintien de chaque jour et facteur de portion conseillé.
+- `substitute.js` : fonctions pures, testées dans `tests/substitute.test.mjs`. Classement des aliments proches (même type, répartition de macros), quantité équivalente en kcal, protéines ou glucides, recherche libre, construction de la variante, détection d'une variante identique (même catégorie, mêmes aliments et quantités). Aucun calcul de macros : les totaux restent dérivés par `resolveMeal`.
 - `store.js` : état Vue réactif, `computed` dérivés, persistance, actions. Les composants lisent le store et n'ont pas de logique métier.
+- **Fiche repas et substitution** : `MealDetail` (macros facultatives, ingrédients, recette, variante, contextes) est partagé par la carte de l'onglet Repas, la popup `MealSheetDialog` (ouverte depuis « Ma journée ») et le futur planificateur ; les actions (copier, dupliquer…) restent à la charge de l'hôte, via les fonctions du store (`duplicateMeal`, `editMeal`, `openMealSheet`). `IngredientList` porte le bouton ⇄ (`substitutable`) ; `SubstitutePanel` sert en popup (`SubstituteDialog`), intégré à « Dupliquer ce repas » et en calculateur (`mode="calc"`). Une substitution produit toujours un **repas perso** (`substitutionDraft`) ; `replace` (`{ where: 'day', index, mealId }`) dit où le mettre à l'enregistrement (`applyReplace`, même facteur) ; pour brancher le planificateur, ajouter un cas `where` dans `applyReplace`.
+- **Boîtes de dialogue empilées** : `state.ui.dialogs` est une pile. `openDialog` repart de zéro, `pushDialog` empile (fermer revient à la boîte précédente), `replaceDialog` remplace celle du dessus, `closeAllDialogs` vide la pile.
 - Les composants sont des objets avec `template` (compilé dans le navigateur, build ESM avec compilateur).
 
 ## Modèle de données
@@ -57,7 +62,7 @@ scripts/          validate-data.mjs        tests/  (node --test)        vendor/ 
 npm run validate && npm test
 ```
 
-Les tests couvrent le calcul (macros, arrondis, cru/cuit, aliments composés et surcharge, densité par catégorie, tags, cibles avec profils fictifs, filtres, journées), l'export CSV (colonnes, BOM, échappement, valeurs stables), la sauvegarde et les règles alimentaires. L'interface n'a pas de test automatisé dans le dépôt : si tu la modifies, ouvre-la en local (`python -m http.server`) et vérifie à la main : aucune erreur dans la console à l'ouverture ; profil vide puis renseigné ; filtres cumulables ; création, modification, suppression et rechargement d'un repas perso ; création d'un aliment perso et usage dans un repas ; modification des macros d'un aliment du recueil (repas, densités, tags, filtres, « Ma journée » et « Journées types » se mettent à jour sans rechargement) ; suppression, remplacement et restauration d'un aliment ; réinitialisation ; switch Cru / Cuit sans changement des totaux.
+Les tests couvrent le calcul (macros, arrondis, cru/cuit, aliments composés et surcharge, densité par catégorie, tags, cibles avec profils fictifs, filtres, journées), l'export CSV (colonnes, BOM, échappement, valeurs stables), la sauvegarde et les règles alimentaires. L'interface n'a pas de test automatisé dans le dépôt : si tu la modifies, ouvre-la en local (`python -m http.server`) et vérifie à la main : aucune erreur dans la console à l'ouverture ; profil vide puis renseigné ; filtres cumulables ; création, modification, suppression et rechargement d'un repas perso ; création d'un aliment perso et usage dans un repas ; modification des macros d'un aliment du recueil (repas, densités, tags, filtres, « Ma journée » et « Journées types » se mettent à jour sans rechargement) ; suppression, remplacement et restauration d'un aliment ; réinitialisation ; switch Cru / Cuit sans changement des totaux ; fiche d'un repas en popup depuis « Ma journée » ; substitution par ⇄ (popup, puis « Dupliquer ce repas » préremplie, plusieurs substitutions avant d'enregistrer, variante qui remplace le repas dans « Ma journée » avec la même portion, rien de changé si on ferme, variante identique proposée au lieu d'un doublon) ; calculateur « Échanger un aliment » sans enregistrement.
 
 ## Conventions
 
@@ -66,4 +71,4 @@ Les tests couvrent le calcul (macros, arrondis, cru/cuit, aliments composés et 
 - Affichage arrondi au gramme et à 10 kcal ; calculs internes jamais arrondis. Les condiments négligeables (sel, poivre, épices, moutarde à l'ancienne, jus de citron) ne sont pas comptés : les mentionner dans la préparation.
 - Typographie française (virgule décimale, espaces insécables dans les nombres) via les fonctions de formatage de `calc.js`.
 - Accessibilité : contrastes, navigation au clavier, jamais la couleur seule (toujours l'emoji ou le libellé pour la densité).
-- Le dossier `github-workflows/` contient les workflows à placer dans `.github/workflows/` (le connecteur GitHub utilisé pour la création initiale n'avait pas le droit d'y écrire).
+- Les workflows GitHub Actions sont dans `.github/workflows/` : `ci.yml` (validation et tests à chaque push et pull request) et `vendor-vue.yml` (vendorisation de Vue). Le connecteur GitHub de Claude n'a pas le droit d'écrire dans ce dossier : ces fichiers se modifient à la main ou avec git.
