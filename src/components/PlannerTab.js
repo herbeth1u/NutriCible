@@ -103,7 +103,7 @@ export default {
             <h3 id="plan-shop-h" class="card-title">Liste de courses</h3>
             <button type="button" class="btn" :disabled="!view.shopping.groups.length" @click="copyList">Copier la liste</button>
           </div>
-          <p class="muted small">Aliments dédoublonnés, quantités cumulées sur la semaine (portions de chaque jour comprises), regroupés par type. Les féculents et légumes qui se pЀsent cru ou cuit sont comptés crus.</p>
+          <p class="muted small">Aliments dédoublonnés, quantités cumulées sur la semaine (portions de chaque jour comprises), regroupés par type. Les féculents et légumes qui se pèsent cru ou cuit sont comptés crus.</p>
           <div v-for="grp in view.shopping.groups" :key="grp.type" class="shop-group">
             <h4>{{ grp.type }}</h4>
             <ul class="shoplist">
