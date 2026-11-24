@@ -357,7 +357,8 @@ export function restoreBackup(incoming, strategy) {
 }
 
 // ------------------------------------------------------------------ initialisation
-const fetchJson = (name) => fetch(`./data/${name}.json`).then((r) => { if (!r.ok) throw new Error(`data/${name}.json : HTTP ${r.status}`); return r.json(); });
+// `no-cache` : le navigateur revalide les fichiers de data/ à chaque chargement (sinon une ancienne copie en cache, p. ex. un config.json sans planner, peut être servie).
+const fetchJson = (name) => fetch(`./data/${name}.json`, { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error(`data/${name}.json : HTTP ${r.status}`); return r.json(); });
 
 const readDay = () => sanitizeDay(readKey('day', null), (state.base.config?.dayTypes ?? []).map((t) => t.id));
 
