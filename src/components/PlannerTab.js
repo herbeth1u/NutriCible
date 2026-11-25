@@ -15,8 +15,8 @@ export default {
     const dayTypes = S.config.value.dayTypes;
     const sameAsTemplate = computed(() => !S.state.plan || S.state.plan.days.every((d, i) => d.dayType === S.plannerCtx.value.week[i]?.dayType));
     const warnings = (label) => view.value.warnings.filter((w) => w.day === label);
-    // Écart signé, arrondi à 10 kcal comme tout l'affichage : jamais « -0 » ni « +0 ».
-    const sign = (v) => { const k = Math.round(v / 10) * 10 || 0; return `${k > 0 ? '+' : ''}${C.fmtNum(k)}`; };
+    // Écart signé, arrondi à l'unité comme tout l'affichage : jamais « -0 » ni « +0 ».
+    const sign = C.fmtSigned;
     const sheet = (d, it) => S.openMealSheet(it.id, null, { portion: d.factor, replaceWhere: { where: 'plan', day: d.index, mealId: it.id } });
     const toMyDay = (d) => {
       if (S.state.day.items.length && !window.confirm('Remplacer le contenu de « Ma journée » par ce jour du planning ?')) return;
