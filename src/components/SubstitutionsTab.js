@@ -28,7 +28,7 @@ export default {
       const cfg = S.config.value;
       const rest = C.restKcal(S.state.user.profile, cfg.calc);
       const kcal = rest + +act.kcal;
-      return { kcal, ref: t[dayType.value.id].kcal, factor: C.fitFactor(t[dayType.value.id].kcal, kcal) };
+      return { kcal, ref: t[dayType.value.id].kcal, factor: C.fitFactor(t[dayType.value.id].kcal, kcal, cfg.planner.step) };
     });
     return { sub, sorted, base, openFood, act, outing, dayType, today, status: S.profileStatus, cfg: S.config, kcal: C.fmtKcal, q: C.fmtQty, p: C.fmtPer100, n: C.fmtNum, profile: () => S.openDialog('profile') };
   },
