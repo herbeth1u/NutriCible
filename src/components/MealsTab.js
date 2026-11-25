@@ -34,7 +34,7 @@ export default {
     const bounds = computed(() => {
       const m = S.meals.value;
       const max = (fn) => Math.max(0, ...m.map(fn));
-      return { kcal: up(max((x) => C.roundKcal(x.totals.kcal)), 100), protein: up(max((x) => x.totals.protein), 10), carbs: up(max((x) => x.totals.carbs), 10), fiber: up(max((x) => x.totals.fiber), 5), time: up(max((x) => x.time ?? 0), 5) };
+      return { kcal: up(max((x) => C.roundDisplay(x.totals.kcal)), 100), protein: up(max((x) => x.totals.protein), 10), carbs: up(max((x) => x.totals.carbs), 10), fiber: up(max((x) => x.totals.fiber), 5), time: up(max((x) => x.time ?? 0), 5) };
     });
     const densities = computed(() => cfg.value.densityLevels.map((l) => ({ value: l.id, label: `${l.emoji} ${l.label}` })));
     const tagOptions = computed(() => [...Object.values(cfg.value.autoTags).map((t) => t.label), ...cfg.value.manualTags]);
