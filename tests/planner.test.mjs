@@ -134,8 +134,8 @@ test('budget : somme des budgets = dépense de la semaine, jamais sous 90 % de l
         assert.ok(d.budget >= 0.9 * d.target.expenditure - 1e-9, `${name} ${d.label} : budget sous 90 % de la dépense`);
         assert.ok(d.factor >= 0.5 && d.factor <= 2, `${name} ${d.label} : facteur ${d.factor}`);
         if (d.fixed) continue;
-        // le facteur est arrondi au pas de 5 % : l'écart au budget ne dépasse pas la moitié d'un pas des repas du jour
-        assert.ok(Math.abs(d.delta) <= 0.025 * d.totals.kcal + 1, `${name} ${d.label} : ${Math.round(d.adjusted.kcal)} kcal pour un budget de ${Math.round(d.budget)}`);
+        // le facteur est arrondi au pas de 1 % : l'écart au budget ne dépasse pas la moitié d'un pas (0,5 %) des repas du jour
+        assert.ok(Math.abs(d.delta) <= (w.config.planner.step / 2) * d.totals.kcal + 1, `${name} ${d.label} : ${Math.round(d.adjusted.kcal)} kcal pour un budget de ${Math.round(d.budget)}`);
         near(assert, d.delta, d.adjusted.kcal - d.budget, 1e-9);
         near(assert, d.adjusted.kcal, d.totals.kcal * d.factor, 1e-6);
       }
@@ -146,11 +146,12 @@ test('budget : somme des budgets = dépense de la semaine, jamais sous 90 % de l
   }
 });
 
-test('budget : le facteur du jour est un multiple de 5 % ; le bilan additionne les jours ajustés', async () => {
+test('budget : le facteur du jour est un multiple du pas (1 %) ; le bilan additionne les jours ajustés', async () => {
   const w = await world();
   const ctx = plannerCtx(w, PROFILES.lourd);
   const view = P.viewPlan(ctx, P.generateWeek(ctx, { seed: 8 }));
-  for (const d of view.days) near(assert, Math.round(d.factor / 0.05) * 0.05, d.factor, 1e-9);
+  assert.equal(w.config.planner.step, 0.01);
+  for (const d of view.days) near(assert, Math.round(d.factor / 0.01) * 0.01, d.factor, 1e-9);
   const sumK = view.days.reduce((s, d) => s + d.adjusted.kcal, 0);
   near(assert, view.week.total.kcal, sumK, 1e-6);
   near(assert, view.week.average, sumK / 7, 1e-6);
