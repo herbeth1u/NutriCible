@@ -78,7 +78,7 @@ test('CSV : « Aliments principaux » sans ingrédients internes, ingrédients e
   const pizza = parsed.find((r) => r[0].startsWith('Pizza maison allégée margherita'));
   assert.ok(!/farine|levure/i.test(pizza[10]));
   assert.match(pizza[13], /100 g de farine de blé T150\*/);
-  const poulet = parsed.find((r) => r[0].startsWith('Poulet poêlué courgette'));
+  const poulet = parsed.find((r) => r[0].startsWith('Poulet poêlé courgette'));
   assert.ok(poulet[13].split('\n').includes('180 g de filet de poulet entier (cru)*'));
   assert.ok(poulet[13].split('\n').includes("10 g d'huile d'olive*"));
   assert.ok(poulet[13].split('\n').includes('300 ml de thé bio froid et jus de citron'));
