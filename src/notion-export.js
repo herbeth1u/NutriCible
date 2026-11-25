@@ -4,7 +4,7 @@
 // strictement identiques d'un export à l'autre, sinon « Merge with CSV » de Notion crée des doublons.
 // Le nom d'un repas est la clé stable. Le profil n'est jamais exporté.
 
-import { roundKcal, roundG, isConvertible } from './calc.js';
+import { roundDisplay, isConvertible } from './calc.js';
 
 export const CSV_COLUMNS = [
   'Nom', 'Origine', 'Catégorie', 'Contextes', 'Densité', 'Kcal',
@@ -12,7 +12,7 @@ export const CSV_COLUMNS = [
   'Aliments principaux', 'Tags', 'Temps (min)', 'Ingrédients', 'Préparation et variante',
 ];
 
-export const BOM = '\uFEFF';
+export const BOM = '﻿';
 
 /** Échappement CSV : guillemets doublés, retours à la ligne autorisés entre guillemets. */
 export function csvEscape(v) {
@@ -52,7 +52,7 @@ export function mealRow(m) {
     m.category,
     m.contexts.join(', '),
     `${m.density.emoji} ${m.density.label}`,
-    roundKcal(t.kcal), roundG(t.protein), roundG(t.carbs), roundG(t.fat), roundG(t.fiber),
+    roundDisplay(t.kcal), roundDisplay(t.protein), roundDisplay(t.carbs), roundDisplay(t.fat), roundDisplay(t.fiber),
     m.mainFoods.join(', '),
     m.tags.join(', '),
     m.time ?? '',
