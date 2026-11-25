@@ -12,10 +12,24 @@ test('macros : scale, add, sum', () => {
   assert.deepEqual(C.sum([]), C.zero());
 });
 
-test('arrondis : 10 kcal, gramme, quantités', () => {
-  assert.equal(C.roundKcal(1234), 1230);
-  assert.equal(C.roundKcal(1235), 1240);
-  assert.equal(C.roundG(12.5), 13);
+const flat = (s) => s.replace(/\s/g, ' '); // espaces insécables → espace
+
+test("arrondis : kcal et macros à l'unité, quantités", () => {
+  assert.equal(C.fmtInt(487.9), '488');
+  assert.equal(C.fmtInt(487.4), '487');
+  assert.equal(C.fmtInt(-0.4), '0');
+  assert.equal(flat(C.fmtInt(1234.5)), '1 235');
+  assert.equal(C.fmtKcal(487.9), C.fmtInt(487.9));
+  assert.equal(C.fmtG(12.5), '13');
+  assert.ok(Object.is(C.roundDisplay(-0.4), 0), 'jamais −0');
+  assert.equal(C.roundDisplay(504.2), 504);
+  assert.equal(C.fmtSigned(12.4), '+12');
+  assert.equal(C.fmtSigned(-12.4), '-12');
+  assert.equal(C.fmtSigned(0.3), '0');
+  assert.equal(C.fmtSigned(-0.3), '0');
+  assert.equal(flat(C.fmtSigned(1234.5)), '+1 235');
+  assert.equal(C.roundKcal, undefined);
+  assert.equal(C.roundG, undefined);
   assert.equal(C.fmtQty(0.4), '0,4');
   assert.equal(C.fmtQty(23.7), '24');
   assert.equal(C.fmtQty(120), '120');
@@ -186,8 +200,9 @@ test('densité : seuils propres à chaque catégorie', async () => {
   assert.equal(C.densityOf(520, 'Déjeuner', config).id, 'modere');
   assert.equal(C.densityOf(520, 'Dîner', config).id, 'leger');
   assert.equal(C.densityOf(500, 'Déjeuner', config).id, 'leger');
-  assert.equal(C.densityOf(504, 'Déjeuner', config).id, 'leger'); // comparé après arrondi à 10 kcal (500)
-  assert.equal(C.densityOf(506, 'Déjeuner', config).id, 'modere'); // 510
+  assert.equal(C.densityOf(500.4, 'Déjeuner', config).id, 'leger'); // comparé à la valeur affichée (500)
+  assert.equal(C.densityOf(504, 'Déjeuner', config).id, 'modere'); // affichée : 504
+  assert.equal(C.densityOf(506, 'Déjeuner', config).id, 'modere');
   assert.equal(C.densityOf(3000, 'Repas plaisir', config).emoji, '🔴');
   assert.equal(C.densityOf(100, 'Récupération', config).emoji, '🟢');
 });
@@ -197,10 +212,12 @@ test('tags automatiques : OK avant effort, protéines, fibres, saisonnier', asyn
   const t = (o, seasons = [], cat = 'Déjeuner') => C.autoTags({ kcal: 500, protein: 10, carbs: 50, fat: 10, fiber: 2, ...o }, seasons, cat, config);
   assert.deepEqual(t({}), ['OK avant effort']);
   assert.ok(t({ fiber: 6 }).includes('OK avant effort'));
-  assert.ok(!t({ fiber: 6.1 }).includes('OK avant effort'));
+  assert.ok(t({ fiber: 6.4 }).includes('OK avant effort')); // affichée « 6 »
+  assert.ok(!t({ fiber: 6.5 }).includes('OK avant effort')); // affichée « 7 »
   assert.ok(!t({}, [], 'Récupération').includes('OK avant effort'));
   assert.ok(t({ protein: 25 }).includes('Riche en protéines'));
-  assert.ok(!t({ protein: 24.9 }).includes('Riche en protéines'));
+  assert.ok(t({ protein: 24.6 }).includes('Riche en protéines')); // affichée « 25 »
+  assert.ok(!t({ protein: 24.4 }).includes('Riche en protéines')); // affichée « 24 »
   assert.ok(t({ fiber: 10 }).includes('Riche en fibres'));
   assert.ok(t({}, ['ete']).includes('Saisonnier (été)'));
   assert.ok(t({}, ['automne-hiver']).includes('Saisonnier (automne-hiver)'));
@@ -280,9 +297,11 @@ test('cibles par type de journée (profil fictif)', async () => {
   for (const d of config.dayTypes) assert.ok(C.targetFor(d, FICTIVE, config).carbs > 100, d.id);
 });
 
-test('ajustement à la cible : facteur global par pas de 5 %', () => {
+test('ajustement à la cible : facteur global par pas de 1 % (ou du pas donné)', () => {
   assert.equal(C.fitFactor(2000, 2400), 1.2);
-  assert.equal(C.fitFactor(2000, 2190), 1.1);
+  assert.equal(C.fitFactor(2000, 2188), 1.09);
+  assert.equal(C.fitFactor(2000, 2160), 1.08);
+  assert.equal(C.fitFactor(2000, 2160, 0.05), 1.1);
   assert.equal(C.fitFactor(2000, 1000), 0.5);
   assert.equal(C.fitFactor(2000, 9000), 2);
   assert.equal(C.fitFactor(0, 2000), 1);
@@ -312,11 +331,19 @@ test('filtres : ET entre groupes, OU au sein d\'un groupe', async () => {
 test('filtres numériques : kcal, protéines, glucides, fibres, temps', async () => {
   const { meals } = await world();
   const f = (o) => C.filterMeals(meals, { ...C.defaultFilters(), ...o });
-  assert.ok(f({ kcalMin: 500, kcalMax: 600 }).every((m) => C.roundKcal(m.totals.kcal) >= 500 && C.roundKcal(m.totals.kcal) <= 600));
-  assert.ok(f({ proteinMin: 40 }).every((m) => C.roundG(m.totals.protein) >= 40));
-  assert.ok(f({ fiberMax: 6 }).every((m) => C.roundG(m.totals.fiber) <= 6));
-  assert.ok(f({ fiberMin: 15 }).every((m) => C.roundG(m.totals.fiber) >= 15));
-  assert.ok(f({ carbsMin: 80, carbsMax: 100 }).every((m) => C.roundG(m.totals.carbs) >= 80 && C.roundG(m.totals.carbs) <= 100));
+  assert.ok(f({ kcalMin: 500, kcalMax: 600 }).every((m) => C.roundDisplay(m.totals.kcal) >= 500 && C.roundDisplay(m.totals.kcal) <= 600));
+  assert.ok(f({ proteinMin: 40 }).every((m) => C.roundDisplay(m.totals.protein) >= 40));
+  assert.ok(f({ fiberMax: 6 }).every((m) => C.roundDisplay(m.totals.fiber) <= 6));
+  assert.ok(f({ fiberMin: 15 }).every((m) => C.roundDisplay(m.totals.fiber) >= 15));
+  assert.ok(f({ carbsMin: 80, carbsMax: 100 }).every((m) => C.roundDisplay(m.totals.carbs) >= 80 && C.roundDisplay(m.totals.carbs) <= 100));
+  // la comparaison porte sur la valeur affichée : 504,4 kcal s'affiche « 504 », donc passe un filtre « min 504 » mais pas « min 505 »
+  const probe = { id: 'probe', name: 'probe', category: 'Déjeuner', contexts: [], tags: [], lines: [], origin: 'Recueil', time: 0, density: { id: 'x' }, totals: { kcal: 504.4, protein: 24.6, carbs: 0, fat: 0, fiber: 6.4 } };
+  const g = (o) => C.filterMeals([probe], { ...C.defaultFilters(), ...o }).length;
+  assert.equal(g({ kcalMin: 504 }), 1);
+  assert.equal(g({ kcalMin: 505 }), 0);
+  assert.equal(g({ kcalMax: 504 }), 1);
+  assert.equal(g({ proteinMin: 25 }), 1); // 24,6 → 25
+  assert.equal(g({ fiberMax: 6 }), 1); // 6,4 → 6
   assert.ok(f({ timeMax: 5 }).every((m) => (m.time ?? 0) <= 5));
   assert.equal(f({ kcalMin: '', kcalMax: null }).length, meals.length);
 });
