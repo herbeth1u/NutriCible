@@ -43,7 +43,7 @@ puis ouvre http://localhost:8000/.
 
 Un **curseur global** (×0,5 à ×2, par pas de 0,05) règle les portions de toute une journée, dans **Journées types** comme dans **Ma journée**. Dans « Ma journée », le dernier changement l'emporte : un facteur réglé sur un repas lui est propre ; bouger ensuite le curseur global remet tous les repas sur ce facteur.
 
-L'onglet **Cibles et hypothèses** donne un **facteur conseillé par jour** et le bilan hebdomadaire de la semaine type après ajustement : les journées types sont dimensionnées pour un adulte moyen, ce calcul (fait dans ton navigateur, à partir de ton profil) les ramène au maintien.
+L'onglet **Cibles et hypothèses** donne un **facteur conseillé par jour** et le bilan hebdomadaire de la semaine type après ajustement (la **journée type de chaque jour est modifiable** : le choix est enregistré dans ton navigateur, le Planificateur l'utilise pour « Semaine type » et pour les nouvelles semaines, et « Rétablir la semaine type d'origine » revient à la semaine par défaut) : les journées types sont dimensionnées pour un adulte moyen, ce calcul (fait dans ton navigateur, à partir de ton profil) les ramène au maintien.
 
 ### Planificateur de semaine
 
@@ -71,9 +71,9 @@ Trois termes seulement, d'après les **calories actives** de la montre : **sorti
 
 ## Mes données et la sauvegarde
 
-Tes ajouts et modifications (profil, repas perso, aliments perso, valeurs modifiées des aliments du recueil, aliments supprimés, remplacements, « Ma journée », planning de la semaine) sont enregistrés dans le `localStorage` du navigateur sous des clés préfixées `nutricible:v1:` (le domaine GitHub Pages est partagé entre dépôts). Aucun total n'est stocké : tout est recalculé.
+Tes ajouts et modifications (profil, repas perso, aliments perso, valeurs modifiées des aliments du recueil, aliments supprimés, remplacements, « Ma journée », planning de la semaine, semaine type personnalisée) sont enregistrés dans le `localStorage` du navigateur sous des clés préfixées `nutricible:v1:` (le domaine GitHub Pages est partagé entre dépôts). Aucun total n'est stocké : tout est recalculé.
 
-La sauvegarde JSON est au **format 2** (elle contient « Ma journée » et le planning) ; les sauvegardes du format 1 se restaurent toujours (migration), sans toucher à « Ma journée » ni au planning.
+La sauvegarde JSON est au **format 3** (elle contient « Ma journée », le planning et la semaine type personnalisée) ; les sauvegardes des formats 1 et 2 se restaurent toujours (migration), sans toucher à « Ma journée », au planning ni à la semaine type quand le fichier n'en contient pas.
 
 Pour changer d'appareil ou de navigateur : **Sauvegarde → Sauvegarder mes données (JSON)**, puis **Restaurer** sur l'autre appareil (fusion avec gestion des conflits de noms, ou remplacement complet). Si le stockage du navigateur est indisponible, l'appli reste utilisable en mémoire et un bandeau l'indique.
 
@@ -94,7 +94,7 @@ Tout est dans `data/` (JSON avec `schemaVersion`, identifiants stables, aucun to
 | `foods.json` | aliments visibles (valeurs pour 100 g, état de référence, coefficient cuit ÷ cru, saison, portion usuelle) |
 | `internal-ingredients.json` | ingrédients internes des recettes, jamais affichés |
 | `meals.json` | repas du recueil : listes de couples `[identifiant d'aliment, quantité en g]` |
-| `days.json` | journées types (facteurs de portion) et semaine type |
+| `days.json` | journées types (facteurs de portion, une seule par type de journée) et semaine type d'origine |
 | `config.json` | catégories, contextes, tags, seuils de densité, règles des tags, coefficients génériques, réglages du planificateur (`planner`) |
 
 Après toute modification : `npm run validate` puis `npm test`. Le détail des conventions (ajouter un repas, un aliment, un contexte) est dans `CLAUDE.md`. Pour demander une modification à Claude, décris-la simplement (« ajoute un dîner à base de lentilles corail », « passe le seuil de densité des collations à 250 kcal ») : il modifie par petits changements ciblés et relance les tests.
@@ -106,7 +106,7 @@ npm run validate   # validation des données (références, listes, absence de d
 npm test           # tests (lanceur intégré de Node ≥ 20), aucune dépendance
 ```
 
-Les tests couvrent notamment : macros et arrondis, conversion cru/cuit, aliments composés et surcharge, densité par catégorie, tags automatiques (dont « Saisonnier »), métabolisme de base et cibles (profils fictifs), export CSV, sauvegarde et restauration (formats 1 et 2), planificateur de semaine (règles, graine, budgets, liste de courses), règles alimentaires sur les données.
+Les tests couvrent notamment : macros et arrondis, conversion cru/cuit, aliments composés et surcharge, densité par catégorie, tags automatiques (dont « Saisonnier »), métabolisme de base et cibles (profils fictifs), export CSV, sauvegarde et restauration (formats 1 à 3), planificateur de semaine (règles, graine, budgets, liste de courses), règles alimentaires sur les données.
 
 ### Vue vendorisée
 
