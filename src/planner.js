@@ -11,9 +11,10 @@
 // de portion global (calc.fitFactor) ramène ensuite le jour à son budget. Toutes les règles et tous les seuils sont dans
 // config.json (bloc `planner`), jamais en dur ici.
 //
-// Règles dures : légumineuses chaque jour (hors jour fixe), saumon au moins une fois, abats au plus une fois par semaine,
-// lait + cacao sucré seulement les jours de sortie moyenne ou longue, aucun repas répété dans la semaine. Si une règle est
-// impossible à tenir, le tirage la relâche (voir LEVELS) et `viewPlan` affiche l'avertissement correspondant.
+// Règles dures : au moins `minLegumeMeals` repas avec une légumineuse dans la semaine (placés sur autant de jours différents),
+// saumon au moins une fois, abats au plus une fois par semaine, lait + cacao sucré seulement les jours de sortie moyenne ou
+// longue, aucun repas répété dans la semaine. Si une règle est impossible à tenir, le tirage la relâche (voir LEVELS) et
+// `viewPlan` affiche l'avertissement correspondant.
 //
 // Le contexte `ctx` : { meals (repas résolus par calc.resolveMeal), mealIdx?, config, targets (calc.allTargets ou null),
 // week (semaine type : [{ label, dayType }]), reference? ({ [typeDeJournée]: kcal }, pour choisir sans profil) }.
@@ -53,6 +54,16 @@ export function mixSeed(...parts) {
 }
 
 const pickOne = (rng, list) => list[Math.floor(rng() * list.length)];
+/** `n` éléments distincts tirés au hasard (mélange partiel de Fisher-Yates sur une copie). */
+function sample(rng, list, n) {
+  const a = [...list];
+  const k = Math.min(n, a.length);
+  for (let i = 0; i < k; i += 1) {
+    const j = i + Math.floor(rng() * (a.length - i));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, k);
+}
 
 // ------------------------------------------------------------------ config et types de journée
 const mealIndex = (ctx) => ctx.mealIdx ?? new Map(ctx.meals.map((m) => [m.id, m]));
@@ -113,12 +124,13 @@ function poolFor(ctx, dt, slot, f, pred = null) {
   return !out.length && f.repeat ? cascade(base) : out;
 }
 
-/** Ce qui est déjà pris dans la semaine hors le jour `except` : repas, abats, saumon. */
+/** Ce qui est déjà pris dans la semaine hors le jour `except` : repas, abats, saumon, repas à légumineuses. */
 function stateOf(ctx, plan, except) {
   const idx = mealIndex(ctx);
   const used = new Set();
   let offal = 0;
   let salmon = 0;
+  let legume = 0;
   plan.days.forEach((d, i) => {
     if (i === except) return;
     for (const [, id] of d.meals) {
@@ -127,9 +139,10 @@ function stateOf(ctx, plan, except) {
       if (!m) continue;
       if (isOffal(m, ctx.config)) offal += 1;
       if (isSalmon(m, ctx.config)) salmon += 1;
+      if (isLegume(m, ctx.config)) legume += 1;
     }
   });
-  return { used, offal, salmon };
+  return { used, offal, salmon, legume };
 }
 
 const baseFilter = (ctx, state) => ({ used: state.used, offalLeft: Math.max(0, ctx.config.planner.rules.maxOffalPerWeek - state.offal), repeat: false, anyContext: false });
@@ -139,9 +152,15 @@ function canSalmon(ctx, dt, state) {
   return slotsFor(ctx.config, dt).some((s) => poolFor(ctx, dt, s, baseFilter(ctx, state), (m) => isSalmon(m, ctx.config)).length > 0);
 }
 
+/** Un jour peut-il accueillir un repas à légumineuses (contextes stricts, repas encore libres) ? */
+function canLegume(ctx, dt, state) {
+  return slotsFor(ctx.config, dt).some((s) => poolFor(ctx, dt, s, baseFilter(ctx, state), (m) => isLegume(m, ctx.config)).length > 0);
+}
+
 // ------------------------------------------------------------------ tirage d'un jour
 // Du plus strict au plus souple : on ne relâche une règle que si la précédente est impossible à tenir.
-// Les contextes se relâchent d'abord, puis la répétition, puis le saumon du jour, puis les légumineuses, puis un créneau peut rester vide.
+// Les contextes se relâchent d'abord, puis la répétition, puis le saumon du jour, puis les légumineuses du jour (si le jour doit
+// en contenir), puis un créneau peut rester vide.
 const LEVELS = [
   { needs: ['salmon', 'legume'], anyContext: false, repeat: false },
   { needs: ['salmon', 'legume'], anyContext: true, repeat: false },
@@ -197,16 +216,17 @@ function scoreDay(ctx, dt, picked, budget) {
 }
 
 /**
- * Tire les repas d'un jour : `attempts` tirages comparés, le meilleur est gardé.
+ * Tire les repas d'un jour : `attempts` tirages comparés, le meilleur est gardé. `salmon` et `legume` : le jour doit contenir
+ * un repas au saumon, un repas à légumineuses (jamais exigé un jour fixe).
  * @returns {[string, string][]} couples [créneau, identifiant de repas], dans l'ordre des créneaux
  */
-function drawDay(ctx, dt, seed, state, { budget = null, salmon = false } = {}) {
+function drawDay(ctx, dt, seed, state, { budget = null, salmon = false, legume = false } = {}) {
   const { config } = ctx;
   const slots = slotsFor(config, dt);
   const fixed = isFixedType(config, dt.id);
   const rng = mulberry32(seed);
   for (const lv of LEVELS) {
-    const needs = lv.needs.filter((n) => (n === 'salmon' ? salmon : !fixed));
+    const needs = lv.needs.filter((n) => (n === 'salmon' ? salmon : legume && !fixed));
     let best = null;
     for (let a = 0; a < (fixed ? 1 : config.planner.attempts); a += 1) {
       const picks = attempt(ctx, dt, slots, rng, state, lv, needs);
@@ -241,7 +261,8 @@ const clonePlan = (plan) => ({ ...plan, days: plan.days.map((d) => ({ ...d, meal
 
 /**
  * Génère une semaine. `dayTypes` : types de journée de chaque jour (par défaut ceux de la semaine type).
- * Ordre du tirage : jours fixes (cheat meal), jour du saumon, puis les autres du plus contraint au moins contraint.
+ * Ordre du tirage : jours fixes (cheat meal), jour du saumon et jours à légumineuses (tirés d'abord, parmi les jours ouverts),
+ * puis les autres du plus contraint au moins contraint.
  */
 export function generateWeek(ctx, { seed = 1, dayTypes = null } = {}) {
   const { config } = ctx;
@@ -261,23 +282,59 @@ export function generateWeek(ctx, { seed = 1, dayTypes = null } = {}) {
   const rng = mulberry32(mixSeed(s, 0x5a1d));
   const salmonDays = open.filter((i) => canSalmon(ctx, dts[i], none));
   const salmonDay = salmonDays.length ? pickOne(rng, salmonDays) : -1;
+  // Jours qui devront contenir une légumineuse : min(minLegumeMeals, jours ouverts), en préférant ceux qui peuvent en accueillir une.
+  const legumeNeeded = Math.min(config.planner.rules.minLegumeMeals, open.length);
+  const legumeRng = mulberry32(mixSeed(s, 0x1e90));
+  const able = open.filter((i) => canLegume(ctx, dts[i], none));
+  const legumeDays = new Set(sample(legumeRng, able, legumeNeeded));
+  if (legumeDays.size < legumeNeeded) for (const i of sample(legumeRng, open.filter((i) => !legumeDays.has(i)), legumeNeeded - legumeDays.size)) legumeDays.add(i);
   const tight = (i) => Math.min(...slotsFor(config, dts[i]).map((sl) => poolFor(ctx, dts[i], sl, baseFilter(ctx, none)).length));
   const order = [...open].sort((a, b) => (a === salmonDay ? -1 : b === salmonDay ? 1 : 0) || tight(a) - tight(b) || a - b);
   for (const i of order) {
-    plan.days[i].meals = drawDay(ctx, dts[i], plan.days[i].seed, stateOf(ctx, plan, i), { budget: budgets?.[i] ?? null, salmon: i === salmonDay });
+    plan.days[i].meals = drawDay(ctx, dts[i], plan.days[i].seed, stateOf(ctx, plan, i), { budget: budgets?.[i] ?? null, salmon: i === salmonDay, legume: legumeDays.has(i) });
   }
   return plan;
 }
 
-/** Retire les repas d'un jour puis le retire au sort : même type de journée, graine propre au jour. */
-function redrawDay(ctx, plan, index) {
+/**
+ * Retire les repas d'un jour puis le retire au sort : même type de journée, graine propre au jour. Le jour doit contenir une
+ * légumineuse seulement si les autres jours en contiennent moins que le minimum de la semaine (ou si `needLegume` l'impose).
+ */
+function redrawDay(ctx, plan, index, { needLegume = false } = {}) {
   const day = plan.days[index];
   const dt = dayTypeOf(ctx.config, day.dayType);
   day.meals = [];
   const state = stateOf(ctx, plan, index);
   const fixed = isFixedType(ctx.config, day.dayType);
   const salmon = !fixed && state.salmon === 0 && canSalmon(ctx, dt, state); // le saumon de la semaine ne doit pas disparaître
-  day.meals = drawDay(ctx, dt, day.seed, state, { budget: planBudgets(ctx, plan)?.[index] ?? null, salmon });
+  const legume = !fixed && (needLegume || state.legume < ctx.config.planner.rules.minLegumeMeals);
+  day.meals = drawDay(ctx, dt, day.seed, state, { budget: planBudgets(ctx, plan)?.[index] ?? null, salmon, legume });
+  return plan;
+}
+
+const hasLegume = (ctx, day) => day.meals.some(([, id]) => { const m = mealIndex(ctx).get(id); return !!m && isLegume(m, ctx.config); });
+
+/**
+ * Si un jour devenu fixe (cheat meal) fait passer la semaine sous le minimum de repas à légumineuses, des jours ouverts sans
+ * légumineuse sont retirés au sort avec cette exigence, un par un, jusqu'au minimum (les jours qui en ont déjà ne bougent pas).
+ * Sans effet quand le minimum est tenu ou qu'aucun jour ne peut en accueillir une.
+ */
+function topUpLegumes(ctx, plan) {
+  const { config } = ctx;
+  const count = () => plan.days.reduce((n, d) => n + d.meals.filter(([, id]) => { const m = mealIndex(ctx).get(id); return !!m && isLegume(m, config); }).length, 0);
+  const tried = new Set();
+  while (count() < config.planner.rules.minLegumeMeals) {
+    const free = plan.days.map((d, i) => i).filter((i) => {
+      const d = plan.days[i];
+      return !tried.has(i) && !isFixedType(config, d.dayType) && !hasLegume(ctx, d) && canLegume(ctx, dayTypeOf(config, d.dayType), stateOf(ctx, plan, i));
+    });
+    if (!free.length) break;
+    const i = sample(mulberry32(mixSeed(plan.seed, 0x1e91, tried.size)), free, 1)[0];
+    tried.add(i);
+    const before = plan.days[i].meals;
+    redrawDay(ctx, plan, i, { needLegume: true });
+    if (!hasLegume(ctx, plan.days[i])) plan.days[i].meals = before; // exigence relâchée par le tirage : on garde le jour d'origine
+  }
   return plan;
 }
 
@@ -286,16 +343,16 @@ export function regenerateDay(ctx, plan, index, { seed } = {}) {
   if (!plan.days[index]) return plan;
   const next = clonePlan(plan);
   next.days[index].seed = seed === undefined ? mixSeed(next.days[index].seed, 1) : uint(seed);
-  return redrawDay(ctx, next, index);
+  return topUpLegumes(ctx, redrawDay(ctx, next, index));
 }
 
-/** Change le type d'un jour et le regénère : les budgets des autres jours changent, leurs repas non (leurs facteurs sont recalculés). */
+/** Change le type d'un jour et le regénère : les budgets des autres jours changent, leurs repas non (leurs facteurs sont recalculés), sauf si le minimum de légumineuses de la semaine l'exige (`topUpLegumes`). */
 export function setDayType(ctx, plan, index, dayTypeId, { seed } = {}) {
   if (!plan.days[index] || plan.days[index].dayType === dayTypeId || !dayTypeOf(ctx.config, dayTypeId)) return plan;
   const next = clonePlan(plan);
   next.days[index].dayType = dayTypeId;
   next.days[index].seed = seed === undefined ? mixSeed(next.days[index].seed, 2) : uint(seed);
-  return redrawDay(ctx, next, index);
+  return topUpLegumes(ctx, redrawDay(ctx, next, index));
 }
 
 /** Remplace un repas du planning (variante issue d'une substitution, par exemple) en gardant son créneau. */
@@ -355,11 +412,15 @@ export function viewPlan(ctx, plan) {
   const balance = expenditure === null ? null : total.kcal - expenditure;
   const week = {
     total, average: total.kcal / (days.length || 1), expenditure, balance,
+    legumes: { count: legumeCount(ctx, days), min: p.rules.minLegumeMeals },
     budgetTotal: budgets ? budgets.reduce((a, b) => a + b, 0) : null,
     status: balance === null ? null : Math.abs(balance) <= p.balanceTolerance * expenditure ? 'maintien' : balance > 0 ? 'surplus' : 'déficit',
   };
   return { seed: plan.seed, days, week, warnings: auditPlan(ctx, days, week), shopping: shoppingList(ctx, days) };
 }
+
+/** Nombre de repas à légumineuses de la semaine (jours lus par `viewPlan`). */
+const legumeCount = (ctx, days) => days.reduce((n, d) => n + d.items.filter((it) => it.meal && isLegume(it.meal, ctx.config)).length, 0);
 
 /** Avertissements : règles non tenues, repas introuvables, budget hors de portée. Dérivés du planning, jamais stockés. */
 export function auditPlan(ctx, days, week = null) {
@@ -384,7 +445,6 @@ export function auditPlan(ctx, days, week = null) {
       if (!it.meal.contexts.some((c) => accepted.includes(c))) warn(where, 'context', `« ${it.meal.name} » ne correspond pas au contexte « ${d.dayType.label} ».`);
       if (hasMilkCocoa(it.meal, config) && !milkCocoaAllowed(config, d.dayType)) warn(where, 'milk-cocoa', `« ${it.meal.name} » : lait et cacao sucré sont réservés aux jours de sortie moyenne ou longue.`);
     }
-    if (!d.fixed && !d.items.some((it) => it.meal && isLegume(it.meal, config))) warn(where, 'legume', 'Aucune légumineuse ce jour-là.');
     if (!d.fixed && d.budget !== null && Math.abs(d.delta) > p.gapWarning * d.budget) {
       warn(where, 'kcal-gap', `Budget de ${fmtKcal(d.budget)} kcal hors de portée avec ces repas (portions limitées à ×${fmtNum(d.factor, 2)}) : écart de ${fmtKcal(d.delta)} kcal.`);
     }
@@ -394,6 +454,10 @@ export function auditPlan(ctx, days, week = null) {
   }
   if (week && week.budgetTotal !== null && week.budgetTotal > week.expenditure + 1) {
     warn(null, 'floor', `Le cheat meal est trop copieux pour tenir le maintien : le budget des autres jours est limité à ${fmtNum(p.floor * 100)} % de leur dépense, la semaine reste en surplus d'environ ${fmtKcal(week.budgetTotal - week.expenditure)} kcal.`);
+  }
+  const legumes = legumeCount(ctx, days);
+  if (legumes < p.rules.minLegumeMeals) {
+    warn(null, 'legume', legumes ? `Seulement ${legumes} repas avec légumineuses cette semaine (minimum ${p.rules.minLegumeMeals}).` : `Aucun repas avec légumineuses cette semaine (minimum ${p.rules.minLegumeMeals}).`);
   }
   if (!salmon) warn(null, 'salmon', 'Aucun repas au saumon cette semaine : aucun n\'est possible avec ces types de journée.');
   if (offal > p.rules.maxOffalPerWeek) warn(null, 'offal', `${offal} repas d'abats cette semaine (maximum ${p.rules.maxOffalPerWeek}).`);
