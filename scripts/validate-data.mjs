@@ -193,6 +193,7 @@ export function validateData({ foods, internal, meals, days, config }) {
     for (const id of pl.fixedDayTypes ?? []) if (!dayTypeIds.includes(id)) err(`config.planner.fixedDayTypes : type de journée « ${id} » inconnu`);
     const r = pl.rules ?? {};
     if (!ftypes.includes(r.legumeType)) err(`config.planner.rules.legumeType : type d'aliment « ${r.legumeType} » inconnu`);
+    if (!Number.isInteger(r.minLegumeMeals) || r.minLegumeMeals < 0) err('config.planner.rules.minLegumeMeals : entier positif ou nul attendu');
     if (!mtags.includes(r.offalTag)) err(`config.planner.rules.offalTag : tag « ${r.offalTag} » inconnu`);
     if (!Number.isInteger(r.maxOffalPerWeek) || r.maxOffalPerWeek < 0) err('config.planner.rules.maxOffalPerWeek : entier positif ou nul attendu');
     if (!r.salmonFoods?.length) err('config.planner.rules.salmonFoods : liste vide');
