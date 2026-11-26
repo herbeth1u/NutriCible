@@ -169,6 +169,12 @@ export function validateData({ foods, internal, meals, days, config }) {
       if (!isNum(factor) || factor <= 0 || factor > 3) err(`${where} : facteur de portion invalide pour « ${id} »`);
     }
   }
+  // Une seule journée type par type de journée : le lien journée → type (semaine type, kcal de référence du planificateur) le suppose.
+  for (const t of dayTypes) {
+    const n = dayList.filter((d) => d.dayType === t.id).length;
+    if (n === 0) err(`type de journée « ${t.id} » : aucune journée type (une seule attendue)`);
+    else if (n > 1) err(`type de journée « ${t.id} » : ${n} journées types (une seule attendue)`);
+  }
   if (!Array.isArray(days.week) || days.week.length !== 7) err('days.json : la semaine type doit contenir 7 jours');
   for (const w of days.week ?? []) if (!dayIds.has(w.day)) err(`semaine type : journée « ${w.day} » inconnue`);
 

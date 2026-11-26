@@ -10,7 +10,7 @@ export default {
   emits: ['close'],
   setup(_, { emit }) {
     const r = reactive({ error: '', data: null, name: '', exportedAt: '', mode: 'merge', strategy: 'keep', report: null });
-    const counts = computed(() => (r.data ? { meals: r.data.meals.length, foods: r.data.foods.length, edits: Object.keys(r.data.foodEdits).length, deleted: r.data.deletedFoods.length, dayMeals: r.data.day ? r.data.day.items.length : 0, plan: !!r.data.plan, profile: Object.values(r.data.profile).some((v) => v !== null && v !== '') } : null));
+    const counts = computed(() => (r.data ? { meals: r.data.meals.length, foods: r.data.foods.length, edits: Object.keys(r.data.foodEdits).length, deleted: r.data.deletedFoods.length, dayMeals: r.data.day ? r.data.day.items.length : 0, plan: !!r.data.plan, week: !!r.data.week, profile: Object.values(r.data.profile).some((v) => v !== null && v !== '') } : null));
     const save = () => { S.exportBackup(); S.toast('Sauvegarde téléchargée : garde-la hors du dépôt, elle contient ton profil.'); };
     const pick = async (e) => {
       const file = e.target.files && e.target.files[0];
@@ -33,7 +33,7 @@ export default {
       <section>
         <h3>Sauvegarder</h3>
         <p class="notice warn">⚠ Ce fichier contient des <b>données personnelles</b> (ton profil) : ne le publie pas et ne le dépose pas dans le dépôt.</p>
-        <p>Il garde ton profil, tes repas et aliments perso, tes modifications et suppressions d'aliments, « Ma journée » et le planning de la semaine : utile pour changer d'appareil ou de navigateur.</p>
+        <p>Il garde ton profil, tes repas et aliments perso, tes modifications et suppressions d'aliments, « Ma journée », le planning de la semaine et la semaine type que tu as personnalisée : utile pour changer d'appareil ou de navigateur.</p>
         <button type="button" class="btn primary" @click="save">Sauvegarder mes données (JSON)</button>
       </section>
       <section>
@@ -41,7 +41,7 @@ export default {
         <label>Fichier de sauvegarde <input type="file" accept="application/json,.json" @change="pick"></label>
         <p v-if="r.error" class="errors" role="alert">{{ r.error }}</p>
         <div v-if="counts" aria-live="polite">
-          <p><b>{{ r.name }}</b><template v-if="r.exportedAt"> (créé le {{ r.exportedAt.slice(0, 10) }})</template> : {{ counts.meals }} repas perso, {{ counts.foods }} aliments perso, {{ counts.edits }} aliments modifiés, {{ counts.deleted }} supprimés<template v-if="counts.profile">, profil</template><template v-if="counts.dayMeals">, « Ma journée » ({{ counts.dayMeals }} repas)</template><template v-if="counts.plan">, planning de la semaine</template>.</p>
+          <p><b>{{ r.name }}</b><template v-if="r.exportedAt"> (créé le {{ r.exportedAt.slice(0, 10) }})</template> : {{ counts.meals }} repas perso, {{ counts.foods }} aliments perso, {{ counts.edits }} aliments modifiés, {{ counts.deleted }} supprimés<template v-if="counts.profile">, profil</template><template v-if="counts.dayMeals">, « Ma journée » ({{ counts.dayMeals }} repas)</template><template v-if="counts.plan">, planning de la semaine</template><template v-if="counts.week">, semaine type personnalisée</template>.</p>
           <fieldset class="box">
             <legend>Mode</legend>
             <label class="check"><input type="radio" value="merge" v-model="r.mode"> Fusionner avec mes données actuelles</label>

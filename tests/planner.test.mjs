@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { validateData } from '../scripts/validate-data.mjs';
 import * as C from '../src/calc.js';
 import * as P from '../src/planner.js';
+import { effectiveWeek } from '../src/week.js';
 import { FICTIVE, FICTIVE_F, near, plannerCtx, world } from './helpers.mjs';
 
 const PROFILES = {
@@ -576,6 +577,36 @@ test('semaine type et référence : types de journée de days.json, kcal de la j
   const ref = P.referenceKcal(w.days.days, w.mealIdx);
   assert.deepEqual(Object.keys(ref).sort(), [...new Set(w.days.days.map((d) => d.dayType))].sort());
   assert.ok(ref.cheat > 2900 && ref.cheat < 3100);
+});
+
+test('semaine type personnalisée : le planificateur l\'utilise pour une nouvelle génération, un planning existant ne change pas', async () => {
+  const w = await world();
+  const dayIds = w.days.days.map((d) => d.id);
+  const mine = ['j-longue', 'j-repos', 'j-moyenne', 'j-courte', 'j-dimanche', 'j-veille-longue', 'j-cheat'];
+  const custom = effectiveWeek(w.days.week, mine, dayIds);
+  const base = plannerCtx(w);
+  const ctx = { ...base, week: P.weekTypes(custom, w.days.days) };
+  assert.deepEqual(P.weekTypes(custom, w.days.days).map((x) => x.dayType), ['longue', 'repos', 'moyenne', 'courte', 'dimanche', 'veille-longue', 'cheat']);
+  assert.deepEqual(P.weekTypes(custom, w.days.days).map((x) => x.label), base.week.map((x) => x.label), 'mêmes libellés de jours');
+  const existing = P.generateWeek(base, { seed: 11 });
+  const snap = JSON.stringify(existing);
+  const fresh = P.generateWeek(ctx, { seed: 11 });
+  assert.deepEqual(fresh.days.map((d) => d.dayType), ['longue', 'repos', 'moyenne', 'courte', 'dimanche', 'veille-longue', 'cheat']);
+  assert.deepEqual(existing.days.map((d) => d.dayType), base.week.map((x) => x.dayType), 'le planning existant garde ses types');
+  assert.equal(JSON.stringify(existing), snap, 'le planning existant n\'est pas modifié');
+  // le bouton « Semaine type » du planificateur compare au contexte : ni identique à l'ancienne semaine, ni à la nouvelle
+  const sameAsTemplate = (c, plan) => plan.days.every((d, i) => d.dayType === c.week[i].dayType);
+  assert.equal(sameAsTemplate(base, existing), true);
+  assert.equal(sameAsTemplate(ctx, existing), false);
+  assert.equal(sameAsTemplate(ctx, fresh), true);
+  // règles tenues sur la semaine personnalisée (jour fixe compris), avec et sans profil
+  for (const profile of [FICTIVE, null]) {
+    const c = { ...plannerCtx(w, profile), week: ctx.week };
+    const view = P.viewPlan(c, P.generateWeek(c, { seed: 5 }));
+    assert.equal(view.days.length, 7);
+    assert.ok(view.week.legumes.count >= w.config.planner.rules.minLegumeMeals, 'légumineuses');
+    if (profile) near(assert, view.week.budgetTotal, view.week.expenditure, 1e-6);
+  }
 });
 
 // ------------------------------------------------------------------ données

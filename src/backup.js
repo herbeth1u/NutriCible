@@ -7,13 +7,15 @@
 import { emptyProfile, normalize } from './calc.js';
 import { sanitizeDay } from './day.js';
 import { sanitizePlan } from './planner.js';
+import { WEEK_LENGTH } from './week.js';
 
 export const APP = 'NutriCible';
 // Format 2 : la sauvegarde contient aussi « Ma journée » (`day`) et le planning de la semaine (`plan`).
 // `day` et `plan` valent null quand la sauvegarde n'en contient pas (fichier de format 1, ou pas de planning généré) : rien à restaurer.
-export const FORMAT = 2;
+// Format 3 : et la semaine type choisie dans « Cibles et hypothèses » (`week` : 7 identifiants de journées types, ou null = semaine d'origine de data/days.json).
+export const FORMAT = 3;
 
-export const emptyUser = () => ({ profile: emptyProfile(), meals: [], foods: [], foodEdits: {}, deletedFoods: [], replacements: {}, day: null, plan: null });
+export const emptyUser = () => ({ profile: emptyProfile(), meals: [], foods: [], foodEdits: {}, deletedFoods: [], replacements: {}, day: null, plan: null, week: null });
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -87,6 +89,7 @@ export function sanitizeUser(raw) {
   }
   u.day = isObj(raw.day) ? sanitizeDay(raw.day) : null; // le type de journée est revalidé au chargement (la config n'est pas connue ici)
   u.plan = sanitizePlan(raw.plan);
+  u.week = Array.isArray(raw.week) && raw.week.length === WEEK_LENGTH && raw.week.every((x) => typeof x === 'string') ? [...raw.week] : null; // les identifiants sont revalidés au chargement (days.json n'est pas connu ici)
   return u;
 }
 
@@ -94,6 +97,7 @@ export function sanitizeUser(raw) {
 export const MIGRATIONS = {
   0: (d) => ({ ...d, replacements: d?.replacements ?? {} }),
   1: (d) => ({ ...d, day: d?.day ?? null, plan: d?.plan ?? null }), // « Ma journée » et planning : absents des sauvegardes de format 1
+  2: (d) => ({ ...d, week: d?.week ?? null }), // semaine type personnalisée : absente des sauvegardes de format 2 (semaine d'origine)
 };
 
 export function migrate(file) {
@@ -165,6 +169,9 @@ export function mergeBackup(current, incoming, strategy = 'keep', reserved = {})
   // en mode « garder l'existant », l'importé ne prend la place que d'une journée vide ou d'une absence de planning.
   if (incoming.day && (strategy !== 'keep' || !user.day?.items.length)) user.day = { ...incoming.day, items: incoming.day.items.map((it) => ({ ...it, meal: remap(it.meal) })) };
   if (incoming.plan && (strategy !== 'keep' || !user.plan)) user.plan = { ...incoming.plan, days: incoming.plan.days.map((d) => ({ ...d, meals: d.meals.map(([slot, id]) => [slot, remap(id)]) })) };
+
+  // Semaine type : l'importée l'emporte quand elle est personnalisée ; en mode « garder l'existant », seulement si l'existante est celle d'origine.
+  if (incoming.week && (strategy !== 'keep' || !user.week)) user.week = [...incoming.week];
 
   for (const [id, patch] of Object.entries(incoming.foodEdits)) if (strategy !== 'keep' || !(id in user.foodEdits)) user.foodEdits[id] = patch;
   user.deletedFoods = [...new Set([...user.deletedFoods, ...incoming.deletedFoods])];

@@ -28,6 +28,9 @@ test('validation : détecte doublons, références cassées, totaux stockés et 
   assert.ok(has(d, /contexte/));
   d = base(); d.days.days[0].items.push(['repas-fantome', 1]);
   assert.ok(has(d, /repas-fantome/));
+  d = base(); d.days.days[1].dayType = d.days.days[0].dayType;
+  assert.ok(has(d, /type de journée « repos » : 2 journées types/), 'deux journées types pour un même type de journée');
+  assert.ok(has(d, /type de journée « courte » : aucune journée type/), 'un type de journée sans journée type');
   d = base(); d.foods.foods[0].season = 'printemps';
   assert.ok(has(d, /saison/));
   d = base(); d.foods.foods[0].name = 'Œufs, durs';

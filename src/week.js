@@ -4,6 +4,32 @@
 
 import { fitFactor, scale, sum, weekReport } from './calc.js';
 
+/** Nombre de jours de la semaine type (Lundi à Dimanche) : il ne change pas. */
+export const WEEK_LENGTH = 7;
+
+/**
+ * Semaine type effective : celle de l'utilisateur (un identifiant de journée type par jour) sur la semaine d'origine de data/days.json.
+ * Par rang, l'identifiant de `userWeek` s'il existe dans `dayIds`, sinon celui de `baseWeek` ; une liste de longueur différente
+ * de celle de `baseWeek` (7) est ignorée. Les libellés des jours viennent toujours de `baseWeek`.
+ * @param {{label:string, day:string}[]} baseWeek @param {string[]|null|undefined} userWeek @param {Iterable<string>} dayIds
+ * @returns {{label:string, day:string}[]}
+ */
+export function effectiveWeek(baseWeek, userWeek, dayIds) {
+  const known = new Set(dayIds);
+  const custom = Array.isArray(userWeek) && userWeek.length === baseWeek.length ? userWeek : null;
+  return baseWeek.map((w, i) => ({ ...w, day: custom && known.has(custom[i]) ? custom[i] : w.day }));
+}
+
+/**
+ * Forme stockée (state.user.week) d'une semaine choisie : `null` quand elle est celle d'origine, sinon la liste des identifiants
+ * (identifiants inconnus ramenés à ceux d'origine).
+ * @returns {string[]|null}
+ */
+export function normalizeUserWeek(baseWeek, userWeek, dayIds) {
+  const ids = effectiveWeek(baseWeek, userWeek, dayIds).map((w) => w.day);
+  return ids.every((id, i) => id === baseWeek[i].day) ? null : ids;
+}
+
 /**
  * Répartit le budget de la semaine : somme des budgets = somme des dépenses (maintien).
  * - une journée « fixe » (cheat meal : bloc unique non ajustable) garde ses kcal ;
@@ -35,14 +61,15 @@ export function weekBudget(rows, { floor = 0.9 } = {}) {
 
 /**
  * Bilan hebdomadaire d'une semaine type avec facteurs de portion conseillés (par pas de `step`).
+ * `fixedDayTypes` (config.planner.fixedDayTypes) : types de journée dont les kcal sont fixes (cheat meal) ; il peut y en avoir 0, 1 ou plusieurs dans la semaine.
  * Sans cibles (profil incomplet) : mêmes lignes, sans budget ni facteur.
  */
-export function weekBalance(week, days, mealIdx, targets, dayTypes, { floor = 0.9, step = 0.05 } = {}) {
+export function weekBalance(week, days, mealIdx, targets, dayTypes, { floor = 0.9, step = 0.05, fixedDayTypes = [] } = {}) {
   const base = weekReport(week, days, mealIdx, targets, dayTypes);
   if (!targets) {
     return { ...base, rows: base.rows.map((r) => ({ ...r, budget: null, fit: 1, fixed: false, adjusted: r.totals })), adjusted: base.total, budgetTotal: null, adjustedBalance: null };
   }
-  const input = base.rows.map((r) => ({ expenditure: r.target.expenditure, target: r.target.kcal, fixed: r.day.dayType === 'cheat', fixedKcal: r.totals.kcal }));
+  const input = base.rows.map((r) => ({ expenditure: r.target.expenditure, target: r.target.kcal, fixed: fixedDayTypes.includes(r.day.dayType), fixedKcal: r.totals.kcal }));
   const budget = weekBudget(input, { floor });
   const rows = base.rows.map((r, i) => {
     const fixed = input[i].fixed;

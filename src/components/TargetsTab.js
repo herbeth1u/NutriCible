@@ -8,7 +8,7 @@ import { weekBalance } from '../week.js';
 export default {
   setup() {
     const cfg = S.config;
-    const week = computed(() => weekBalance(S.state.base.week, S.state.base.days, S.mealIdx.value, S.targets.value, cfg.value.dayTypes, { floor: cfg.value.planner.floor, step: cfg.value.planner.step }));
+    const week = computed(() => weekBalance(S.week.value, S.state.base.days, S.mealIdx.value, S.targets.value, cfg.value.dayTypes, { floor: cfg.value.planner.floor, step: cfg.value.planner.step, fixedDayTypes: cfg.value.planner.fixedDayTypes }));
     const range = computed(() => {
       const p = S.state.user.profile; // lu dans le computed : le profil est remplacé à chaque enregistrement
       return p.weightMinKg && p.weightMaxKg && p.weightKg ? { min: p.weightMinKg, max: p.weightMaxKg, ok: p.weightKg >= p.weightMinKg && p.weightKg <= p.weightMaxKg } : null;
@@ -16,7 +16,7 @@ export default {
     const outLabel = (id) => (id ? cfg.value.outings.find((o) => o.id === id).label : 'aucune sortie');
     const sgn = C.fmtSigned;
     const fit = (v) => C.fmtNum(v, v % 1 ? 2 : 0);
-    return { cfg, targets: S.targets, status: S.profileStatus, week, range, outLabel, sgn, fit, profile: () => S.openDialog('profile'), kcal: C.fmtKcal, g: C.fmtG, n: C.fmtNum };
+    return { cfg, days: S.state.base.days, custom: S.weekCustom, setDay: S.setWeekDay, resetWeek: S.resetWeek, targets: S.targets, status: S.profileStatus, week, range, outLabel, sgn, fit, profile: () => S.openDialog('profile'), kcal: C.fmtKcal, g: C.fmtG, n: C.fmtNum };
   },
   template: `
     <section aria-labelledby="t-targets">
@@ -68,12 +68,17 @@ export default {
       </div>
 
       <h3>Bilan hebdomadaire d'une semaine type (cheat meal inclus)</h3>
+      <p class="muted small">Choisis la journée type de chaque jour : le choix est enregistré tout de suite et le bilan se recalcule. Le Planificateur utilisera cette semaine pour « Semaine type » et pour les nouvelles semaines ; une semaine déjà générée ne change pas.</p>
+      <p v-if="custom" class="week-custom"><span class="badge perso">personnalisée</span> <button type="button" class="btn" @click="resetWeek">Rétablir la semaine type d'origine</button></p>
       <div class="table-wrap">
         <table class="targets">
           <thead><tr><th scope="col">Jour</th><th scope="col">Journée type</th><th scope="col">Apports kcal</th>
             <template v-if="targets"><th scope="col">Dépense</th><th scope="col">Budget de maintien</th><th scope="col">Facteur conseillé</th><th scope="col">Apports ajustés</th><th scope="col">Écart</th></template></tr></thead>
           <tbody>
-            <tr v-for="r in week.rows" :key="r.label"><th scope="row">{{ r.label }}</th><td>{{ r.day.name }}</td><td>{{ kcal(r.totals.kcal) }}</td>
+            <tr v-for="(r, i) in week.rows" :key="r.label"><th scope="row">{{ r.label }}</th>
+              <td><label class="week-select"><span class="sr-only">Journée type du {{ r.label.toLowerCase() }}</span>
+                <select :value="r.day.id" @change="setDay(i, $event.target.value)"><option v-for="d in days" :key="d.id" :value="d.id">{{ d.name }}</option></select></label></td>
+              <td>{{ kcal(r.totals.kcal) }}</td>
               <template v-if="targets"><td>{{ kcal(r.target.expenditure) }}</td><td>{{ kcal(r.budget) }}</td><td>{{ r.fixed ? 'fixe' : '×' + fit(r.fit) }}</td><td>{{ kcal(r.adjusted.kcal) }}</td><td>{{ sgn(r.adjusted.kcal - r.budget) }}</td></template></tr>
           </tbody>
           <tfoot><tr><th scope="row" colspan="2">Semaine</th><td><b>{{ kcal(week.total.kcal) }}</b> (≈ {{ kcal(week.average) }} par jour)</td>
@@ -84,6 +89,6 @@ export default {
         Solde hebdomadaire avec les portions d'origine : <b>{{ sgn(week.balance) }} kcal</b> ({{ sgn(week.balance / 7) }} par jour).
         Avec les facteurs conseillés : <b>{{ sgn(week.adjustedBalance) }} kcal</b> ({{ sgn(week.adjustedBalance / 7) }} par jour), soit un maintien.
       </p>
-      <p class="muted small">Les journées types sont dimensionnées pour un adulte moyen : le <b>budget de maintien</b> de chaque jour est calculé ici à partir de ton profil. Il part de la dépense du jour (coefficient du type de journée compris) et répartit le reste de la semaine pour que la somme des apports égale la somme des dépenses ; le jour du cheat meal reste tel quel (bloc fixe) et aucun jour ne descend sous 90 % de sa dépense. Le <b>facteur conseillé</b> (par pas de {{ n(cfg.planner.step * 100) }} %) est celui à appliquer aux portions de la journée type, par exemple avec « Ajuster à ma cible ». Semaine type : une sortie chaque soir du lundi au jeudi, repos le vendredi (veille de sortie longue), sortie longue le samedi, récupération le dimanche ; un seul cheat meal par semaine, un jour de sortie courte.</p>
+      <p class="muted small">Les journées types sont dimensionnées pour un adulte moyen : le <b>budget de maintien</b> de chaque jour est calculé ici à partir de ton profil. Il part de la dépense du jour (coefficient du type de journée compris) et répartit le reste de la semaine pour que la somme des apports égale la somme des dépenses ; le jour du cheat meal reste tel quel (bloc fixe) et aucun jour ne descend sous 90 % de sa dépense. Le <b>facteur conseillé</b> (par pas de {{ n(cfg.planner.step * 100) }} %) est celui à appliquer aux portions de la journée type, par exemple avec « Ajuster à ma cible ». Semaine type par défaut (modifiable ci-dessus) : une sortie chaque soir du lundi au jeudi, repos le vendredi (veille de sortie longue), sortie longue le samedi, récupération le dimanche ; un seul cheat meal par semaine, un jour de sortie courte.</p>
     </section>`,
 };

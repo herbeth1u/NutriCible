@@ -11,10 +11,11 @@ import { clampFactor, effectiveFactor, emptyDay, sanitizeDay, withGlobal, withMe
 import { generateWeek, referenceKcal, regenerateDay, replacePlanMeal, sanitizePlan, setDayType, shoppingToText, viewPlan, weekTypes } from './planner.js';
 import { findIdenticalMeal, substituteItems, variantBase } from './substitute.js';
 import { sanitizeFilters, sanitizeFoodFilters, sanitizeTab } from './prefs.js';
+import { effectiveWeek, normalizeUserWeek } from './week.js';
 
 export const PREFIX = 'nutricible:v1:';
 const FORMAT_VERSION = 1;
-const USER_KEYS = ['profile', 'meals', 'foods', 'foodEdits', 'deletedFoods', 'replacements'];
+const USER_KEYS = ['profile', 'meals', 'foods', 'foodEdits', 'deletedFoods', 'replacements', 'week'];
 
 let storage = null;
 try {
@@ -68,10 +69,14 @@ export const dayRows = computed(() => state.day.items.map((it, index) => ({ ...i
 export const dayTotals = computed(() => C.dayTotals(state.day.items.map((it) => ({ meal: it.meal, factor: effectiveFactor(it, state.day.global) })), mealIdx.value).totals);
 export const dayTarget = computed(() => targets.value?.[state.day.dayType] ?? null);
 export const foodTypes = computed(() => config.value?.foodTypes ?? []);
+/** Semaine type effective : celle d'origine (data/days.json), avec les journées types choisies dans « Cibles et hypothèses » (state.user.week). */
+export const week = computed(() => effectiveWeek(state.base.week, state.user.week, state.base.days.map((d) => d.id)));
+/** La semaine type diffère-t-elle de celle d'origine ? */
+export const weekCustom = computed(() => normalizeUserWeek(state.base.week, state.user.week, state.base.days.map((d) => d.id)) !== null);
 /** Contexte du planificateur : repas résolus, config, cibles (null sans profil), semaine type, kcal de référence des journées types. */
 export const plannerCtx = computed(() => ({
   meals: meals.value, mealIdx: mealIdx.value, config: config.value, targets: targets.value,
-  week: weekTypes(state.base.week, state.base.days), reference: referenceKcal(state.base.days, mealIdx.value),
+  week: weekTypes(week.value, state.base.days), reference: referenceKcal(state.base.days, mealIdx.value),
 }));
 /** Planning lu : jours, budgets, facteurs, bilan, avertissements, liste de courses (tout est recalculé, rien n'est stocké). */
 export const planView = computed(() => (state.plan && config.value ? viewPlan(plannerCtx.value, state.plan) : null));
@@ -249,6 +254,28 @@ export function restoreFood(id) {
   }
 }
 
+// ------------------------------------------------------------------ semaine type (Cibles et hypothèses)
+// state.user.week : null (semaine d'origine) ou 7 identifiants de journées types. Le planning existant n'est jamais modifié :
+// la semaine type sert aux prochaines générations et au bouton « Semaine type » du planificateur.
+const dayIds = () => state.base.days.map((d) => d.id);
+/** Choisit la journée type d'un jour (0 = lundi). Enregistré tout de suite ; `null` si le résultat est la semaine d'origine. */
+export function setWeekDay(index, dayId) {
+  if (!Number.isInteger(index) || index < 0 || index >= state.base.week.length || !dayIds().includes(dayId)) return false;
+  const next = week.value.map((w) => w.day);
+  if (next[index] === dayId) return false;
+  next[index] = dayId;
+  state.user.week = normalizeUserWeek(state.base.week, next, dayIds());
+  toast('Semaine type enregistrée : le Planificateur l\'utilisera pour « Semaine type » et pour les nouvelles semaines.');
+  return true;
+}
+/** Rétablit la semaine type d'origine (data/days.json). */
+export function resetWeek() {
+  if (state.user.week === null) return false;
+  state.user.week = null;
+  toast('Semaine type d\'origine rétablie.');
+  return true;
+}
+
 // ------------------------------------------------------------------ « Ma journée »
 // Le dernier changement l'emporte (voir src/day.js) : un facteur réglé sur un repas lui est propre ;
 // le curseur global remet tous les repas sur ce facteur.
@@ -339,7 +366,7 @@ export const copyShoppingList = () => planView.value && copyWithToast(shoppingTo
 
 // ------------------------------------------------------------------ sauvegarde et restauration
 const plain = (x) => JSON.parse(JSON.stringify(x));
-// Format 2 : la sauvegarde contient aussi « Ma journée » et le planning (voir src/backup.js).
+// Format 3 : la sauvegarde contient aussi « Ma journée », le planning et la semaine type choisie (voir src/backup.js).
 const snapshot = () => ({ ...plain(state.user), day: plain(state.day), plan: plain(state.plan) });
 export const exportBackup = () => downloadFile(backupFileName(), serialize(snapshot()), 'application/json');
 
@@ -348,6 +375,7 @@ export function restoreBackup(incoming, strategy) {
   const { user, report } = mergeBackup(snapshot(), plain(incoming), strategy, reserved); // plain : `incoming` vient d'un état réactif, que structuredClone ne copie pas
   const { day, plan, ...rest } = user;
   Object.assign(state.user, rest);
+  state.user.week = normalizeUserWeek(state.base.week, state.user.week, state.base.days.map((d) => d.id));
   const dayTypeIds = (state.base.config?.dayTypes ?? []).map((t) => t.id);
   // null = la sauvegarde n'en contient pas (format 1, ou pas de planning) : on garde l'actuel. Objet day.js : mêmes références (Ma journée le lit).
   if (day) Object.assign(state.day, sanitizeDay(day, dayTypeIds));
@@ -368,6 +396,7 @@ export async function init(load = fetchJson) {
     state.base = { foods: foodsJson.foods, internal: internal.ingredients, meals: mealsJson.meals, days: days.days, week: days.week, config: cfg };
     const { day: _day, plan: _plan, ...stored } = sanitizeUser(Object.fromEntries(USER_KEYS.map((k) => [k, readKey(k, undefined)])));
     state.user = stored;
+    state.user.week = normalizeUserWeek(state.base.week, state.user.week, state.base.days.map((d) => d.id)); // identifiants revalidés : days.json a pu changer
     state.day = readDay();
     state.plan = sanitizePlan(readKey('plan', null), { dayTypeIds: cfg.dayTypes.map((t) => t.id) });
     // Préférences d'interface : revalidées à la lecture (le contenu de data/ ou les aliments ont pu changer).

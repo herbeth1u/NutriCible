@@ -6,7 +6,7 @@
     "Sortie courte",
     "Sortie moyenne",
     "Sortie longue",
-    "Dimanche de récupération",
+    "Jour de récupération",
     "Veille de sortie longue",
     "Petit-déjeuner de sortie longue",
     "Post-effort",
@@ -43,7 +43,7 @@
     { "id": "courte", "label": "Jour de sortie courte", "context": "Sortie courte", "outing": "courte", "kcalFactor": 1, "fatPerKg": 1.0 },
     { "id": "moyenne", "label": "Jour de sortie moyenne", "context": "Sortie moyenne", "outing": "moyenne", "kcalFactor": 1, "fatPerKg": 1.0 },
     { "id": "longue", "label": "Jour de sortie longue", "context": "Sortie longue", "outing": "longue", "kcalFactor": 1, "fatPerKg": 1.0 },
-    { "id": "dimanche", "label": "Dimanche de récupération", "context": "Dimanche de récupération", "outing": null, "kcalFactor": 1, "fatPerKg": 1.1 },
+    { "id": "dimanche", "label": "Jour de récupération", "context": "Jour de récupération", "outing": null, "kcalFactor": 1, "fatPerKg": 1.1 },
     { "id": "veille-longue", "label": "Veille de sortie longue", "context": "Veille de sortie longue", "outing": null, "kcalFactor": 1.1, "fatPerKg": 0.8 },
     { "id": "cheat", "label": "Journée cheat meal", "context": "Journée cheat meal", "outing": "courte", "kcalFactor": 1, "fatPerKg": 1.0 },
     { "id": "veille-plaisir", "label": "Veille de repas plaisir", "context": "Veille de repas plaisir", "outing": "courte", "kcalFactor": 0.92, "fatPerKg": 0.9 },
@@ -87,15 +87,15 @@
       "cheat": ["Repas plaisir"]
     },
     "contexts": {
-      "repos": ["Jour de repos", "Dimanche de récupération"],
+      "repos": ["Jour de repos", "Jour de récupération"],
       "courte": ["Sortie courte", "Sortie moyenne", "Jour de repos"],
       "moyenne": ["Sortie moyenne", "Sortie courte"],
       "longue": ["Petit-déjeuner de sortie longue", "Sortie longue", "Sortie moyenne", "Sortie courte"],
-      "dimanche": ["Dimanche de récupération", "Jour de repos"],
-      "veille-longue": ["Veille de sortie longue", "Sortie moyenne", "Dimanche de récupération"],
+      "dimanche": ["Jour de récupération", "Jour de repos"],
+      "veille-longue": ["Veille de sortie longue", "Sortie moyenne", "Jour de récupération"],
       "cheat": ["Journée cheat meal"],
       "veille-plaisir": ["Veille de repas plaisir", "Sortie courte", "Sortie moyenne"],
-      "lendemain-plaisir": ["Lendemain de repas plaisir", "Sortie courte", "Sortie moyenne", "Dimanche de récupération"]
+      "lendemain-plaisir": ["Lendemain de repas plaisir", "Sortie courte", "Sortie moyenne", "Jour de récupération"]
     },
     "fixedDayTypes": ["cheat"],
     "rules": {
