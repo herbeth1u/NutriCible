@@ -1,5 +1,5 @@
 // src/components/Bar.js — barre de progression vers une cible (jamais la couleur seule : texte et pourcentage).
-import { fmtNum } from '../calc.js';
+import { fmtInt } from '../calc.js';
 
 export default {
   props: {
@@ -19,9 +19,9 @@ export default {
       return this.pct < 90 ? 'low' : this.pct > 110 ? 'high' : 'ok';
     },
     text() { return { low: 'en dessous', high: 'au-dessus', ok: 'dans la cible', none: '' }[this.level]; },
-    shown() { return this.min !== null && this.max !== null ? `${fmtNum(Math.round(this.min))}–${fmtNum(Math.round(this.max))}` : this.target !== null ? fmtNum(Math.round(this.target)) : ''; },
+    shown() { return this.min !== null && this.max !== null ? `${fmtInt(this.min)}–${fmtInt(this.max)}` : this.target !== null ? fmtInt(this.target) : ''; },
   },
-  methods: { n: (v) => fmtNum(Math.round(v)) },
+  methods: { n: fmtInt },
   template: `
     <div class="bar">
       <div class="bar-head"><span>{{ label }}</span><b>{{ n(value) }} {{ unit }}<template v-if="shown"> / {{ shown }} {{ unit }}</template></b></div>

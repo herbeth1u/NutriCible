@@ -24,12 +24,16 @@ export const sum = (list) => list.reduce(add, zero());
 export const normPer100 = (p = {}) => ({ kcal: +p.kcal || 0, protein: +p.protein || 0, carbs: +p.carbs || 0, fat: +p.fat || 0, fiber: +p.fiber || 0 });
 
 // ---------------------------------------------------------------- affichage
-// Affichage arrondi au gramme et à 10 kcal. Les calculs internes ne sont jamais arrondis.
-export const roundKcal = (n) => Math.round(n / 10) * 10;
-export const roundG = (n) => Math.round(n);
+// Affichage arrondi à l'unité (kcal et macros), partout. Les calculs internes ne sont jamais arrondis.
+/** Valeur affichée d'un nombre de kcal ou de g : arrondi à l'unité, jamais −0. Sert aussi aux comparaisons à un seuil. */
+export const roundDisplay = (n) => Math.round(n) || 0;
 export const fmtNum = (n, d = 0) => Number(n).toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
-export const fmtKcal = (n) => fmtNum(roundKcal(n));
-export const fmtG = (n) => fmtNum(roundG(n));
+/** Seul formateur des kcal et des macros : entier, espace insécable des milliers. */
+export const fmtInt = (n) => fmtNum(roundDisplay(n));
+/** Écart signé : « +12 », « −12 », « 0 » sans signe. */
+export const fmtSigned = (n) => { const r = roundDisplay(n); return `${r > 0 ? '+' : ''}${fmtInt(r)}`; };
+export const fmtKcal = fmtInt;
+export const fmtG = fmtInt;
 /** Quantité : entière, sauf sous 5 g où l'on garde une décimale. */
 export const fmtQty = (n) => (Math.abs(n) < 5 && n !== Math.round(n) ? fmtNum(Math.round(n * 10) / 10, 1) : fmtNum(Math.round(n)));
 /** Pour 100 g : une décimale si nécessaire. */
@@ -37,7 +41,7 @@ export const fmtPer100 = (n) => fmtNum(Math.round(n * 10) / 10, Number.isInteger
 export const unitOf = (food) => (food && food.unit === 'ml' ? 'ml' : 'g');
 
 /** Recherche insensible à la casse, aux accents et aux ligatures (« œufs » = « oeufs »). */
-export const normalize = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae').trim();
+export const normalize = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae').trim();
 
 // ---------------------------------------------------------------- cru / cuit
 // coef = poids cuit ÷ poids cru. Les nutriments d'une portion ne changent pas : seul le poids change.
@@ -126,7 +130,7 @@ export function kcalWarning(per100, config, food) {
 /** Densité 🟢/🟡/🔴 : seuils de kcal propres à chaque catégorie de repas. */
 export function densityOf(kcal, category, config) {
   const t = config.density[category] ?? config.density['Dîner'];
-  const k = roundKcal(kcal);
+  const k = roundDisplay(kcal);
   const idx = k <= t.lightMax ? 0 : k <= t.moderateMax ? 1 : 2;
   return { ...config.densityLevels[idx], index: idx };
 }
@@ -135,9 +139,9 @@ export function densityOf(kcal, category, config) {
 export function autoTags(totals, seasons, category, config) {
   const r = config.autoTags;
   const tags = [];
-  if ((!r.okBeforeEffort.categories || r.okBeforeEffort.categories.includes(category)) && totals.fiber <= r.okBeforeEffort.maxFiber) tags.push(r.okBeforeEffort.label);
-  if (totals.protein >= r.highProtein.minProtein) tags.push(r.highProtein.label);
-  if (totals.fiber >= r.highFiber.minFiber) tags.push(r.highFiber.label);
+  if ((!r.okBeforeEffort.categories || r.okBeforeEffort.categories.includes(category)) && roundDisplay(totals.fiber) <= r.okBeforeEffort.maxFiber) tags.push(r.okBeforeEffort.label);
+  if (roundDisplay(totals.protein) >= r.highProtein.minProtein) tags.push(r.highProtein.label);
+  if (roundDisplay(totals.fiber) >= r.highFiber.minFiber) tags.push(r.highFiber.label);
   for (const s of seasons) tags.push(`${r.seasonal.label} (${config.seasons.find((x) => x.id === s)?.label ?? s})`);
   return tags;
 }
@@ -223,13 +227,13 @@ export function filterMeals(meals, f) {
     if (f.tags.length && !f.tags.some((t) => m.tags.some((mt) => mt === t || mt.startsWith(`${t} (`)))) return false;
     if (f.origins.length && !f.origins.includes(m.origin)) return false;
     const t = m.totals;
-    if (has(f.kcalMin) && roundKcal(t.kcal) < +f.kcalMin) return false;
-    if (has(f.kcalMax) && roundKcal(t.kcal) > +f.kcalMax) return false;
-    if (has(f.proteinMin) && roundG(t.protein) < +f.proteinMin) return false;
-    if (has(f.carbsMin) && roundG(t.carbs) < +f.carbsMin) return false;
-    if (has(f.carbsMax) && roundG(t.carbs) > +f.carbsMax) return false;
-    if (has(f.fiberMin) && roundG(t.fiber) < +f.fiberMin) return false;
-    if (has(f.fiberMax) && roundG(t.fiber) > +f.fiberMax) return false;
+    if (has(f.kcalMin) && roundDisplay(t.kcal) < +f.kcalMin) return false;
+    if (has(f.kcalMax) && roundDisplay(t.kcal) > +f.kcalMax) return false;
+    if (has(f.proteinMin) && roundDisplay(t.protein) < +f.proteinMin) return false;
+    if (has(f.carbsMin) && roundDisplay(t.carbs) < +f.carbsMin) return false;
+    if (has(f.carbsMax) && roundDisplay(t.carbs) > +f.carbsMax) return false;
+    if (has(f.fiberMin) && roundDisplay(t.fiber) < +f.fiberMin) return false;
+    if (has(f.fiberMax) && roundDisplay(t.fiber) > +f.fiberMax) return false;
     if (has(f.timeMax) && (m.time ?? 0) > +f.timeMax) return false;
     return true;
   });
@@ -256,8 +260,8 @@ export function dayTotals(items, mealIdx) {
   return { totals, missing };
 }
 
-/** Facteur de portion global (par pas de 5 %) pour atteindre la cible kcal. */
-export function fitFactor(total, target, step = 0.05) {
+/** Facteur de portion global (par pas de `step`, 0,01 dans config.planner.step) pour atteindre la cible kcal. */
+export function fitFactor(total, target, step = 0.01) {
   if (!(total > 0) || !(target > 0)) return 1;
   const f = Math.round(target / total / step) * step;
   return Math.min(2, Math.max(0.5, Math.round(f * 100) / 100));

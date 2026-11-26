@@ -58,15 +58,17 @@ test('CSV : valeurs stables (catégories, contextes, tags, densités appartienne
   assert.equal(new Set(parsed.map((r) => r[0])).size, parsed.length, 'le nom est la clé stable : unique');
 });
 
-test('CSV : kcal arrondies à 10, macros au gramme, cohérentes avec le calcul unique', async () => {
+test("CSV : kcal et macros arrondies à l'unité (entiers), cohérentes avec le calcul unique", async () => {
   const w = await world();
   const parsed = parseCsv(buildCsv(w.meals).text).slice(1);
   for (const r of parsed) {
     const m = w.mealIdx.get(w.meals.find((x) => x.name === r[0]).id);
-    assert.equal(Number(r[5]), C.roundKcal(m.totals.kcal));
-    assert.equal(Number(r[6]), C.roundG(m.totals.protein));
-    assert.equal(Number(r[9]), C.roundG(m.totals.fiber));
-    assert.equal(Number(r[5]) % 10, 0);
+    assert.equal(Number(r[5]), C.roundDisplay(m.totals.kcal));
+    assert.equal(Number(r[6]), C.roundDisplay(m.totals.protein));
+    assert.equal(Number(r[7]), C.roundDisplay(m.totals.carbs));
+    assert.equal(Number(r[8]), C.roundDisplay(m.totals.fat));
+    assert.equal(Number(r[9]), C.roundDisplay(m.totals.fiber));
+    for (const k of [5, 6, 7, 8, 9]) assert.match(r[k], /^\d+$/, `colonne ${k} : entier sans séparateur décimal`);
   }
 });
 
@@ -99,8 +101,9 @@ test('CSV : échappement (guillemets doublés, retours à la ligne, virgules) et
   assert.equal(rows[1][0], 'Test "guillemets", virgule');
   assert.equal(rows[1][1], 'Perso');
   assert.equal(rows[1][3], 'Sortie courte, Jour de repos');
-  assert.equal(rows[1][5], '600');
+  assert.equal(rows[1][5], '604');
   assert.equal(rows[1][6], '30');
+  assert.equal(rows[1][7], '51');
   assert.equal(rows[1][12], '');
   assert.equal(rows[1][14], 'Préparation : Étape 1.\nÉtape 2.\nVariante : Autre.');
   assert.equal(rows[1].length, CSV_COLUMNS.length);

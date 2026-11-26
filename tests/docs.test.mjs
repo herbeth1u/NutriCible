@@ -35,6 +35,18 @@ test('Vue ne s\'importe que via src/vue.js ; le stockage n\'est touché que par 
   assert.match(await read('src/vue.js'), /vendor\/vue\.esm-browser\.prod\.js/);
 });
 
+test("affichage à l'unité : plus de roundKcal ni de roundG dans src/, un seul formateur pour les kcal et macros", async () => {
+  for (const f of (await walk('src')).filter((x) => x.endsWith('.js'))) {
+    const t = await read(f);
+    assert.ok(!/\b(roundKcal|roundG)\b/.test(t), `${f} : roundKcal ou roundG subsiste`);
+  }
+  const calc = await read('src/calc.js');
+  assert.match(calc, /export const roundDisplay\b/);
+  assert.match(calc, /export const fmtInt\b/);
+  assert.match(calc, /export const fmtSigned\b/);
+  assert.ok((await read('CLAUDE.md')).includes('Un seul formateur pour les kcal et les macros'));
+});
+
 test('documentation : README et CLAUDE.md rappellent la règle de confidentialité et les invariants', async () => {
   const readme = await read('README.md');
   const claude = await read('CLAUDE.md');

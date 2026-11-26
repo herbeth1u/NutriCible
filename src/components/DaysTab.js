@@ -18,16 +18,16 @@ export default {
       return { day, fit, totals, missing, target: S.targets.value?.[day.dayType] ?? null, rows: items.map((it) => ({ meal: idx.value.get(it.meal), factor: it.factor })).filter((r) => r.meal) };
     }));
     const label = (id) => S.config.value.dayTypes.find((t) => t.id === id)?.label ?? id;
-    const adjust = (x) => { fits[x.day.id] = C.fitFactor(C.dayTotals(stored(x.day), idx.value).totals.kcal, x.target.kcal); };
+    const adjust = (x) => { fits[x.day.id] = C.fitFactor(C.dayTotals(stored(x.day), idx.value).totals.kcal, x.target.kcal, S.config.value.planner.step); };
     const load = (x) => { S.loadDay(x.day, x.fit); S.toast(`« ${x.day.name} » chargée dans Ma journée.`); };
-    const delta = (x) => (x.target ? Math.round(x.totals.kcal - x.target.kcal) : null);
+    const delta = (x) => (x.target ? C.fmtSigned(x.totals.kcal - x.target.kcal) : null);
     const setFit = (x, v) => { fits[x.day.id] = clampFactor(v); };
-    return { days, fits, label, adjust, load, delta, setFit, status: S.profileStatus, profile: () => S.openDialog('profile'), kcal: C.fmtKcal, g: C.fmtG, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0) };
+    return { days, fits, label, adjust, load, delta, setFit, status: S.profileStatus, profile: () => S.openDialog('profile'), kcal: C.fmtKcal, g: C.fmtG, cfg: S.config, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0) };
   },
   template: `
     <section aria-labelledby="t-days">
       <h2 id="t-days">Journées types</h2>
-      <p class="muted">Une journée complète par type de journée, composée de repas du recueil. Les repas sont dimensionnés pour un adulte actif moyen : une fois ton profil renseigné, « Ajuster à ma cible » calcule un facteur de portion global (par pas de 5 %).</p>
+      <p class="muted">Une journée complète par type de journée, composée de repas du recueil. Les repas sont dimensionnés pour un adulte actif moyen : une fois ton profil renseigné, « Ajuster à ma cible » calcule un facteur de portion global (par pas de {{ n(cfg.planner.step * 100) }} %).</p>
       <p v-if="!status.complete" class="notice">Renseigne <button type="button" class="linklike" @click="profile">Mon profil</button> pour voir l'écart à ta cible (il manque : {{ status.missing.join(', ') }}). Les totaux restent affichés sans comparaison.</p>
       <article v-for="x in days" :key="x.day.id" class="card day">
         <div class="card-top"><h3 class="card-title">{{ x.day.name }}</h3><span class="badge">{{ label(x.day.dayType) }}</span></div>
@@ -49,7 +49,7 @@ export default {
           <button type="button" class="btn sm" :disabled="x.fit === 1" @click="setFit(x, 1)">×1</button>
         </div>
         <div v-if="x.target" class="bars" aria-live="polite">
-          <p><b>Cible : {{ kcal(x.target.kcal) }} kcal</b> · écart <b>{{ delta(x) > 0 ? '+' : '' }}{{ delta(x) }} kcal</b><template v-if="x.fit !== 1"> · portions ×{{ n(x.fit) }}</template></p>
+          <p><b>Cible : {{ kcal(x.target.kcal) }} kcal</b> · écart <b>{{ delta(x) }} kcal</b><template v-if="x.fit !== 1"> · portions ×{{ n(x.fit) }}</template></p>
           <bar label="Kcal" :value="x.totals.kcal" :target="x.target.kcal" unit="kcal" />
           <bar label="Protéines" :value="x.totals.protein" :min="x.target.protein.min" :max="x.target.protein.max" />
           <bar label="Glucides" :value="x.totals.carbs" :target="x.target.carbs" />
