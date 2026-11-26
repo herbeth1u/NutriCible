@@ -298,43 +298,18 @@ export function generateWeek(ctx, { seed = 1, dayTypes = null } = {}) {
 
 /**
  * Retire les repas d'un jour puis le retire au sort : même type de journée, graine propre au jour. Le jour doit contenir une
- * légumineuse seulement si les autres jours en contiennent moins que le minimum de la semaine (ou si `needLegume` l'impose).
+ * légumineuse si les autres jours en contiennent moins que le minimum de la semaine : le jour est tiré directement avec cette
+ * exigence, jamais corrigé ensuite en modifiant un autre jour. Jour fixe (cheat meal) : pas d'exigence, seul l'avertissement de semaine signale le manque.
  */
-function redrawDay(ctx, plan, index, { needLegume = false } = {}) {
+function redrawDay(ctx, plan, index) {
   const day = plan.days[index];
   const dt = dayTypeOf(ctx.config, day.dayType);
   day.meals = [];
   const state = stateOf(ctx, plan, index);
   const fixed = isFixedType(ctx.config, day.dayType);
   const salmon = !fixed && state.salmon === 0 && canSalmon(ctx, dt, state); // le saumon de la semaine ne doit pas disparaître
-  const legume = !fixed && (needLegume || state.legume < ctx.config.planner.rules.minLegumeMeals);
+  const legume = !fixed && state.legume < ctx.config.planner.rules.minLegumeMeals;
   day.meals = drawDay(ctx, dt, day.seed, state, { budget: planBudgets(ctx, plan)?.[index] ?? null, salmon, legume });
-  return plan;
-}
-
-const hasLegume = (ctx, day) => day.meals.some(([, id]) => { const m = mealIndex(ctx).get(id); return !!m && isLegume(m, ctx.config); });
-
-/**
- * Si un jour devenu fixe (cheat meal) fait passer la semaine sous le minimum de repas à légumineuses, des jours ouverts sans
- * légumineuse sont retirés au sort avec cette exigence, un par un, jusqu'au minimum (les jours qui en ont déjà ne bougent pas).
- * Sans effet quand le minimum est tenu ou qu'aucun jour ne peut en accueillir une.
- */
-function topUpLegumes(ctx, plan) {
-  const { config } = ctx;
-  const count = () => plan.days.reduce((n, d) => n + d.meals.filter(([, id]) => { const m = mealIndex(ctx).get(id); return !!m && isLegume(m, config); }).length, 0);
-  const tried = new Set();
-  while (count() < config.planner.rules.minLegumeMeals) {
-    const free = plan.days.map((d, i) => i).filter((i) => {
-      const d = plan.days[i];
-      return !tried.has(i) && !isFixedType(config, d.dayType) && !hasLegume(ctx, d) && canLegume(ctx, dayTypeOf(config, d.dayType), stateOf(ctx, plan, i));
-    });
-    if (!free.length) break;
-    const i = sample(mulberry32(mixSeed(plan.seed, 0x1e91, tried.size)), free, 1)[0];
-    tried.add(i);
-    const before = plan.days[i].meals;
-    redrawDay(ctx, plan, i, { needLegume: true });
-    if (!hasLegume(ctx, plan.days[i])) plan.days[i].meals = before; // exigence relâchée par le tirage : on garde le jour d'origine
-  }
   return plan;
 }
 
@@ -343,16 +318,16 @@ export function regenerateDay(ctx, plan, index, { seed } = {}) {
   if (!plan.days[index]) return plan;
   const next = clonePlan(plan);
   next.days[index].seed = seed === undefined ? mixSeed(next.days[index].seed, 1) : uint(seed);
-  return topUpLegumes(ctx, redrawDay(ctx, next, index));
+  return redrawDay(ctx, next, index);
 }
 
-/** Change le type d'un jour et le regénère : les budgets des autres jours changent, leurs repas non (leurs facteurs sont recalculés), sauf si le minimum de légumineuses de la semaine l'exige (`topUpLegumes`). */
+/** Change le type d'un jour et le regénère : les budgets des autres jours changent, leurs repas non (leurs facteurs sont recalculés). */
 export function setDayType(ctx, plan, index, dayTypeId, { seed } = {}) {
   if (!plan.days[index] || plan.days[index].dayType === dayTypeId || !dayTypeOf(ctx.config, dayTypeId)) return plan;
   const next = clonePlan(plan);
   next.days[index].dayType = dayTypeId;
   next.days[index].seed = seed === undefined ? mixSeed(next.days[index].seed, 2) : uint(seed);
-  return topUpLegumes(ctx, redrawDay(ctx, next, index));
+  return redrawDay(ctx, next, index);
 }
 
 /** Remplace un repas du planning (variante issue d'une substitution, par exemple) en gardant son créneau. */
