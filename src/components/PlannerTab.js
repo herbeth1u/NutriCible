@@ -1,6 +1,7 @@
-// src/components/PlannerTab.js — planificateur de semaine : budget par jour, repas tirés au sort (graine mémorisée),
-// régénération d'un jour, bilan hebdomadaire et liste de courses dédoublonnée. Le moteur est dans src/planner.js ;
-// ici seulement l'affichage et les actions du store. Tout ce qui est affiché est dérivé du planning (rien n'est stocké).
+// src/components/PlannerTab.js — planificateur de semaine : budget par jour, repas tirés au sort (planning mémorisé),
+// régénération d'un jour, ajustements de portions (semaine et jour), retrait et rétablissement d'un repas, bilan hebdomadaire
+// et liste de courses dédoublonnée. Le moteur est dans src/planner.js ; ici seulement l'affichage et les actions du store.
+// Tout ce qui est affiché est dérivé du planning (rien n'est stocké).
 import { computed } from '../vue.js';
 import * as C from '../calc.js';
 import * as S from '../store.js';
@@ -14,6 +15,11 @@ export default {
     const view = S.planView;
     const dayTypes = S.config.value.dayTypes;
     const minLegume = S.config.value.planner.rules.minLegumeMeals;
+    const adjust = S.config.value.planner.adjust;
+    // Un jour a-t-il des ajustements qui changent ses portions ? (le jour fixe n'en a pas)
+    const adjusted = (d) => Math.abs(d.mult - 1) > 1e-9;
+    const hasFixed = computed(() => !!view.value?.days.some((d) => d.fixed));
+    const toMyDayDisabled = (d) => !d.items.some((it) => it.meal && !it.meal.incomplete);
     const sameAsTemplate = computed(() => !S.state.plan || S.state.plan.days.every((d, i) => d.dayType === S.plannerCtx.value.week[i]?.dayType));
     const warnings = (label) => view.value.warnings.filter((w) => w.day === label);
     // Écart signé, arrondi à l'unité comme tout l'affichage : jamais « -0 » ni « +0 ».
@@ -24,7 +30,10 @@ export default {
       if (S.addPlanDayToMyDay(d.index)) S.toast(`${d.label} ajouté à Ma journée.`);
     };
     return {
-      state: S.state, view, dayTypes, minLegume, sameAsTemplate, warnings, sign, sheet, toMyDay, status: S.profileStatus, STATUS,
+      state: S.state, view, dayTypes, minLegume, adjust, adjusted, hasFixed, toMyDayDisabled, sameAsTemplate, warnings, sign, sheet, toMyDay, status: S.profileStatus, STATUS,
+      setAdjust: S.setPlanAdjust, setDayAdjust: S.setPlanDayAdjust, realign: (d) => S.realignPlanDay(d.index),
+      removeMeal: (d, i) => S.removePlanMeal(d.index, i), restoreMeal: (d, j) => S.restorePlanMeal(d.index, j),
+      dayResetLabel: (d) => `Remettre l'ajustement du ${d.label} à ×1`, n2: (v) => C.fmtNum(v, 2), pct: (v) => C.fmtSigned((v - 1) * 100),
       generate: () => S.generatePlan(), reset: () => S.generatePlan({ reset: true }), undo: () => { if (S.undoPlan()) S.toast('Dernière modification annulée.'); },
       regenerate: (d) => S.regeneratePlanDay(d.index), setType: S.setPlanDayType, copyList: S.copyShoppingList, profile: () => S.openDialog('profile'),
       kcal: C.fmtKcal, g: C.fmtG, fmtQty: C.fmtQty, unitOf: C.unitOf, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0),
@@ -33,14 +42,21 @@ export default {
   template: `
     <section aria-labelledby="t-planner">
       <h2 id="t-planner">Planificateur de semaine</h2>
-      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée (la semaine type se règle dans l'onglet Cibles et hypothèses). Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses au moins {{ minLegume }} fois dans la semaine, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue, aucun repas répété.</p>
+      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée (la semaine type se règle dans l'onglet Cibles et hypothèses). Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses au moins {{ minLegume }} fois dans la semaine, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue, aucun repas répété. Les curseurs d'ajustement (semaine, jour) multiplient les portions calculées ; ✕ retire un repas sans recalculer les autres portions : le total du jour baisse, et « Rétablir » le remet.</p>
       <p v-if="!status.complete" class="notice">Renseigne <button type="button" class="linklike" @click="profile">Mon profil</button> pour obtenir les budgets et les facteurs de portion (il manque : {{ status.missing.join(', ') }}). Sans profil, les repas sont tirés près d'une journée type, avec des portions ×1 et sans écart à la cible.</p>
 
       <div class="plan-actions">
         <button type="button" class="btn primary" @click="generate">Générer une nouvelle semaine</button>
         <button type="button" class="btn" :disabled="!state.planUndo" :title="state.planUndo ? 'Annuler : ' + state.planUndo.label : 'Rien à annuler'" @click="undo">Annuler</button>
         <button v-if="state.plan" type="button" class="btn" :disabled="sameAsTemplate" title="Remet les types de journée de la semaine type et tire de nouveaux repas" @click="reset">Semaine type</button>
-        <small v-if="view" class="muted">Graine du tirage : {{ view.seed }} (la même graine redonne la même semaine).</small>
+      </div>
+
+      <div v-if="view" class="globalfactor plan-adjust">
+        <label>Ajustement de la semaine <b>×{{ n2(state.plan.adjust) }} ({{ pct(state.plan.adjust) }}&nbsp;%)</b>
+          <input type="range" :min="adjust.week.min" :max="adjust.week.max" :step="adjust.step" :value="state.plan.adjust" @input="setAdjust($event.target.value)" aria-describedby="plan-adj-help">
+        </label>
+        <button type="button" class="btn sm" :disabled="state.plan.adjust === 1" aria-label="Remettre l'ajustement de la semaine à ×1" @click="setAdjust(1)">×1</button>
+        <small id="plan-adj-help" class="muted">Multiplie les portions calculées de tous les jours. <template v-if="hasFixed">Le jour du cheat meal n'est pas concerné. </template>Le résultat réel se lit dans le bilan de la semaine (solde hebdomadaire, maintien, surplus ou déficit).</small>
       </div>
 
       <p v-if="!sameAsTemplate" class="muted small">Cette semaine ne suit pas ta semaine type : « Semaine type » la rétablit.</p>
@@ -66,27 +82,41 @@ export default {
           <table class="daytable">
             <caption class="sr-only">Repas du {{ d.label }}</caption>
             <tbody>
-              <tr v-for="it in d.items" :key="it.slot + it.id">
+              <tr v-for="(it, i) in d.items" :key="it.slot + it.id + '-' + i">
                 <template v-if="it.meal">
                   <th scope="row"><button type="button" class="linklike dayrow-name" :title="'Ouvrir la fiche de ' + it.meal.name" @click="sheet(d, it)">{{ it.meal.name }}</button></th>
                   <td class="muted">{{ it.slot }}</td>
                   <td>{{ kcal(it.meal.totals.kcal * d.factor) }} kcal</td>
+                  <td class="plan-x"><button type="button" class="icon" :aria-label="'Retirer ' + it.meal.name" title="Retirer ce repas" @click="removeMeal(d, i)">✕</button></td>
                 </template>
-                <template v-else><th scope="row">⚠ repas introuvable</th><td class="muted">{{ it.slot }}</td><td></td></template>
+                <template v-else>
+                  <th scope="row">⚠ repas introuvable</th><td class="muted">{{ it.slot }}</td><td></td>
+                  <td class="plan-x"><button type="button" class="icon" :aria-label="'Retirer le repas introuvable (' + it.slot + ')'" title="Retirer ce repas" @click="removeMeal(d, i)">✕</button></td>
+                </template>
               </tr>
             </tbody>
             <tfoot>
-              <tr><th scope="row">Total</th><td colspan="2"><b>{{ kcal(d.adjusted.kcal) }} kcal</b> · P {{ g(d.adjusted.protein) }} g · G {{ g(d.adjusted.carbs) }} g · L {{ g(d.adjusted.fat) }} g · F {{ g(d.adjusted.fiber) }} g</td></tr>
+              <tr><th scope="row">Total</th><td colspan="3"><b>{{ kcal(d.adjusted.kcal) }} kcal</b> · P {{ g(d.adjusted.protein) }} g · G {{ g(d.adjusted.carbs) }} g · L {{ g(d.adjusted.fat) }} g · F {{ g(d.adjusted.fiber) }} g</td></tr>
             </tfoot>
           </table>
+          <ul v-if="d.removedItems.length" class="plan-removed">
+            <li v-for="(r, j) in d.removedItems" :key="r.slot + r.id + '-' + j">Retiré : <b>{{ r.meal ? r.meal.name : 'repas introuvable' }}</b> ({{ r.slot }}) · <button type="button" class="btn sm" :aria-label="'Rétablir ' + (r.meal ? r.meal.name : 'le repas introuvable')" @click="restoreMeal(d, j)">Rétablir</button></li>
+          </ul>
           <p class="plan-meta">
             <template v-if="d.fixed">Jour fixe : le repas est un bloc estimé, sans facteur de portion.</template>
-            <template v-else>Portions <b>×{{ n(d.factor) }}</b></template>
-            <template v-if="d.budget !== null"> · cible <b>{{ kcal(d.budget) }} kcal</b> · écart <b>{{ sign(d.delta) }} kcal</b></template>
+            <template v-else>Portions <b>×{{ n(d.factor) }}</b><template v-if="adjusted(d)"> (tirage ×{{ n2(d.base) }} · ajustements ×{{ n2(d.mult) }})</template></template>
+            <template v-if="d.budget !== null"> · {{ d.fixed ? 'cible' : 'cible de maintien' }} <b>{{ kcal(d.budget) }} kcal</b><template v-if="adjusted(d)"> · cible ajustée <b>{{ kcal(d.goal) }} kcal</b></template> · écart <b>{{ sign(d.delta) }} kcal</b></template>
           </p>
+          <div v-if="!d.fixed" class="globalfactor plan-adjust">
+            <label>Ajustement du jour <b>×{{ n2(d.adjust) }}</b>
+              <input type="range" :min="adjust.day.min" :max="adjust.day.max" :step="adjust.step" :value="d.adjust" :aria-label="'Ajustement du ' + d.label" @input="setDayAdjust(d.index, $event.target.value)">
+            </label>
+            <button type="button" class="btn sm" :disabled="d.adjust === 1" :aria-label="dayResetLabel(d)" @click="setDayAdjust(d.index, 1)">×1</button>
+            <button type="button" class="btn sm" :disabled="d.budget === null" :aria-label="'Réaligner le ' + d.label + ' sur la cible'" title="Règle l'ajustement du jour pour que ses apports rejoignent la cible (utile après un retrait)" @click="realign(d)">Réaligner sur la cible</button>
+          </div>
           <div class="actions">
             <button type="button" class="btn" :aria-label="'Regénérer le ' + d.label" @click="regenerate(d)">Regénérer ce jour</button>
-            <button type="button" class="btn primary" :aria-label="'Ajouter le ' + d.label + ' à Ma journée'" @click="toMyDay(d)">Ajouter à Ma journée</button>
+            <button type="button" class="btn primary" :disabled="toMyDayDisabled(d)" :aria-label="'Ajouter le ' + d.label + ' à Ma journée'" @click="toMyDay(d)">Ajouter à Ma journée</button>
           </div>
         </article>
 

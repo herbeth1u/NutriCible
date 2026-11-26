@@ -8,7 +8,7 @@ import { reactive, computed, watch } from './vue.js';
 import * as C from './calc.js';
 import { EDIT_KEYS, backupFileName, emptyUser, mergeBackup, sanitizeUser, serialize, uid } from './backup.js';
 import { clampFactor, effectiveFactor, emptyDay, sanitizeDay, withGlobal, withMeal, withOwn, withoutOwn } from './day.js';
-import { generateWeek, referenceKcal, regenerateDay, replacePlanMeal, sanitizePlan, setDayType, shoppingToText, viewPlan, weekTypes } from './planner.js';
+import { carryAdjust, clampAdjust, generateWeek, realignedDayAdjust, referenceKcal, regenerateDay, removeMealAt, replacePlanMeal, restoreMealAt, sanitizePlan, setDayType, shoppingToText, viewPlan, weekTypes } from './planner.js';
 import { findIdenticalMeal, substituteItems, variantBase } from './substitute.js';
 import { sanitizeFilters, sanitizeFoodFilters, sanitizeTab } from './prefs.js';
 import { effectiveWeek, normalizeUserWeek } from './week.js';
@@ -33,7 +33,7 @@ export const state = reactive({
   base: { foods: [], internal: [], meals: [], days: [], week: [], config: null },
   user: emptyStored(),
   day: emptyDay(), // « Ma journée » : { dayType, global, items: [{ meal, base, own? }] } (voir src/day.js)
-  plan: null, // planning de la semaine : { v, seed, days: [{ label, dayType, seed, meals: [[créneau, idRepas]] }] } (voir src/planner.js)
+  plan: null, // planning de la semaine : { v, seed, adjust, days: [{ label, dayType, seed, adjust, meals: [[créneau, idRepas]], removed: [[créneau, idRepas]] }] } (voir src/planner.js)
   planUndo: null, // un niveau d'annulation, en mémoire seulement : { plan, label }
   theme: 'auto',
   ui: { tab: 'meals', dialogs: [], dayOpen: false, filters: C.defaultFilters(), foodFilters: { q: '', types: [], seasons: [], origins: [], usage: '', sort: 'name', dir: 1 }, toast: '' },
@@ -323,8 +323,8 @@ export function loadDay(day, factor = 1) {
 }
 
 // ------------------------------------------------------------------ planificateur de semaine
-// Le planning ne stocke que des choix (graines, types de journée, repas) : tout le reste est dérivé (planView).
-// Chaque modification garde la version précédente en mémoire pour un « Annuler » d'un niveau.
+// Le planning ne stocke que des choix (graines, types de journée, repas, repas retirés, ajustements) : tout le reste est dérivé (planView).
+// Chaque modification lourde garde la version précédente en mémoire pour un « Annuler » d'un niveau ; les curseurs d'ajustement n'y passent pas.
 const newSeed = () => Math.floor(Math.random() * 4294967296);
 function commitPlan(next, label) {
   if (!next || next === state.plan) return false;
@@ -332,11 +332,15 @@ function commitPlan(next, label) {
   state.plan = next;
   return true;
 }
-/** Génère une nouvelle semaine. Les types de journée du planning actuel sont gardés ; `reset` revient à la semaine type. */
+/**
+ * Génère une nouvelle semaine. Les types de journée du planning actuel sont gardés, avec ses ajustements de portions (semaine et jours) ;
+ * les repas retirés ne sont pas repris. `reset` revient à la semaine type et remet tous les ajustements à ×1.
+ */
 export function generatePlan({ reset = false } = {}) {
   if (!plannerCtx.value.config) return false;
   const dayTypes = state.plan && !reset ? state.plan.days.map((d) => d.dayType) : null;
-  return commitPlan(generateWeek(plannerCtx.value, { seed: newSeed(), dayTypes }), reset ? 'retour à la semaine type' : 'nouvelle semaine');
+  const next = generateWeek(plannerCtx.value, { seed: newSeed(), dayTypes });
+  return commitPlan(reset ? next : carryAdjust(next, state.plan), reset ? 'retour à la semaine type' : 'nouvelle semaine');
 }
 export const regeneratePlanDay = (index) => commitPlan(state.plan && regenerateDay(plannerCtx.value, state.plan, index, { seed: newSeed() }), `régénération du ${state.plan?.days[index]?.label ?? 'jour'}`.toLowerCase());
 export const setPlanDayType = (index, dayTypeId) => commitPlan(state.plan && setDayType(plannerCtx.value, state.plan, index, dayTypeId, { seed: newSeed() }), `changement de type du ${state.plan?.days[index]?.label ?? 'jour'}`.toLowerCase());
@@ -346,6 +350,30 @@ export function replaceInPlan(dayIndex, fromMealId, toMealId) {
   if (!state.plan || !m || m.incomplete) return false;
   const next = replacePlanMeal(state.plan, dayIndex, fromMealId, toMealId);
   return next !== state.plan && commitPlan(next, 'remplacement d\'un repas');
+}
+/** Retire un repas d'un jour (n° `mealIndex` parmi ses repas) : il reste compté pour le facteur et le budget du jour, mais plus dans les apports. */
+export const removePlanMeal = (dayIndex, mealIndex) => !!state.plan && commitPlan(removeMealAt(state.plan, dayIndex, mealIndex), 'retrait d\'un repas');
+/** Rétablit un repas retiré (n° `removedIndex` parmi les repas retirés du jour), à sa place dans l'ordre des créneaux. */
+export const restorePlanMeal = (dayIndex, removedIndex) => !!state.plan && commitPlan(restoreMealAt(plannerCtx.value, state.plan, dayIndex, removedIndex), 'rétablissement d\'un repas');
+/**
+ * Ajustements de portions : le curseur de la semaine et ceux des jours modifient le planning SANS passer par `commitPlan`
+ * (chaque cran effacerait sinon l'annulation d'une régénération). Valeurs bornées par config.planner.adjust ; enregistrées comme le reste du planning.
+ */
+export function setPlanAdjust(v) {
+  if (!state.plan) return false;
+  state.plan.adjust = clampAdjust(config.value, 'week', v);
+  return true;
+}
+export function setPlanDayAdjust(index, v) {
+  const day = state.plan?.days[index];
+  if (!day) return false;
+  day.adjust = clampAdjust(config.value, 'day', v);
+  return true;
+}
+/** Règle l'ajustement du jour pour que ses apports rejoignent sa cible (budget × ajustement de la semaine). */
+export function realignPlanDay(index) {
+  if (!state.plan?.days[index]) return false;
+  return setPlanDayAdjust(index, realignedDayAdjust(plannerCtx.value, state.plan, index));
 }
 /** Annule la dernière modification du planning (un seul niveau). */
 export function undoPlan() {
@@ -379,7 +407,7 @@ export function restoreBackup(incoming, strategy) {
   const dayTypeIds = (state.base.config?.dayTypes ?? []).map((t) => t.id);
   // null = la sauvegarde n'en contient pas (format 1, ou pas de planning) : on garde l'actuel. Objet day.js : mêmes références (Ma journée le lit).
   if (day) Object.assign(state.day, sanitizeDay(day, dayTypeIds));
-  const restored = plan ? sanitizePlan(plan, { dayTypeIds }) : null;
+  const restored = plan ? sanitizePlan(plan, { dayTypeIds, adjust: state.base.config?.planner?.adjust }) : null;
   if (restored) { state.plan = restored; state.planUndo = null; }
   return report;
 }
@@ -398,7 +426,7 @@ export async function init(load = fetchJson) {
     state.user = stored;
     state.user.week = normalizeUserWeek(state.base.week, state.user.week, state.base.days.map((d) => d.id)); // identifiants revalidés : days.json a pu changer
     state.day = readDay();
-    state.plan = sanitizePlan(readKey('plan', null), { dayTypeIds: cfg.dayTypes.map((t) => t.id) });
+    state.plan = sanitizePlan(readKey('plan', null), { dayTypeIds: cfg.dayTypes.map((t) => t.id), adjust: cfg.planner?.adjust });
     // Préférences d'interface : revalidées à la lecture (le contenu de data/ ou les aliments ont pu changer).
     Object.assign(state.ui.filters, sanitizeFilters(readKey('filters', null), { config: cfg, foodIds: [...foodIdx.value.keys()] }));
     Object.assign(state.ui.foodFilters, sanitizeFoodFilters(readKey('foodFilters', null), cfg));
