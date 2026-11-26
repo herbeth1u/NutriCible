@@ -16,6 +16,11 @@ const PROFILES = {
 const SEEDS = Array.from({ length: 60 }, (_, i) => i * 7919 + 1);
 const ids = (plan) => plan.days.flatMap((d) => d.meals.map(([, id]) => id));
 const codes = (view) => view.warnings.map((x) => x.code);
+/** Repas à légumineuses d'un planning lu par viewPlan : nombre total et nombre de jours distincts. */
+const legumes = (view, config) => {
+  const perDay = view.days.map((d) => d.items.filter((it) => it.meal && P.isLegume(it.meal, config)).length);
+  return { meals: perDay.reduce((a, b) => a + b, 0), days: perDay.filter((n) => n > 0).length };
+};
 
 // ------------------------------------------------------------------ graine
 test('graine : la même graine redonne exactement la même semaine, des graines différentes la font varier', async () => {
@@ -66,11 +71,12 @@ test('règles dures : tenues pour 60 graines et tous les profils fictifs, sans a
       assert.equal(plan.days.length, 7, where);
       // pas de répétition d'un repas dans la semaine
       assert.equal(new Set(ids(plan)).size, ids(plan).length, `${where} : répétition`);
-      // légumineuses chaque jour (hors cheat meal), saumon au moins une fois, abats au plus une fois
-      for (const d of view.days) {
-        assert.equal(d.fixed, d.dayType.id === 'cheat', where);
-        if (!d.fixed) assert.ok(d.items.some((it) => P.isLegume(it.meal, w.config)), `${where} : légumineuses ${d.label}`);
-      }
+      // légumineuses : au moins minLegumeMeals repas, sur autant de jours distincts ; saumon au moins une fois, abats au plus une fois
+      for (const d of view.days) assert.equal(d.fixed, d.dayType.id === 'cheat', where);
+      const lg = legumes(view, w.config);
+      assert.ok(lg.meals >= w.config.planner.rules.minLegumeMeals, `${where} : ${lg.meals} repas à légumineuses`);
+      assert.ok(lg.days >= w.config.planner.rules.minLegumeMeals, `${where} : légumineuses sur ${lg.days} jours seulement`);
+      assert.deepEqual(view.week.legumes, { count: lg.meals, min: w.config.planner.rules.minLegumeMeals }, where);
       const all = view.days.flatMap((d) => d.items.map((it) => it.meal));
       assert.ok(all.some((m) => P.isSalmon(m, w.config)), `${where} : saumon`);
       assert.ok(all.filter((m) => P.isOffal(m, w.config)).length <= 1, `${where} : abats`);
@@ -198,6 +204,24 @@ test('regenerateDay : seul le jour change, les règles de la semaine restent ten
   }
 });
 
+test('regenerateDay : le minimum de repas à légumineuses reste tenu pour chaque jour regénéré, cheat meal compris', async () => {
+  const w = await world();
+  const min = w.config.planner.rules.minLegumeMeals;
+  for (const profile of [FICTIVE, null]) {
+    const ctx = plannerCtx(w, profile);
+    for (const seed of SEEDS.slice(0, 20)) {
+      const plan = P.generateWeek(ctx, { seed });
+      for (let i = 0; i < plan.days.length; i += 1) {
+        for (const k of [0, 1]) {
+          const view = P.viewPlan(ctx, P.regenerateDay(ctx, plan, i, { seed: seed + 31 * k + i }));
+          assert.ok(legumes(view, w.config).meals >= min, `graine ${seed}, jour ${i}`);
+          assert.ok(!codes(view).includes('legume'), `graine ${seed}, jour ${i}`);
+        }
+      }
+    }
+  }
+});
+
 test('regenerateDay : reproductible avec une graine, graine suivante dérivée sinon, jour fixe : un autre cheat meal ou le même', async () => {
   const w = await world();
   const ctx = plannerCtx(w);
@@ -263,6 +287,68 @@ test('setDayType : un jour devient cheat meal (bloc fixe de 3 000 kcal) puis red
   assert.deepEqual(view.warnings, []);
 });
 
+test('setDayType : jamais d\'autre jour modifié ; vers un jour ordinaire le minimum de légumineuses est tenu, vers un cheat meal seul l\'avertissement signale un manque', async () => {
+  const w = await world();
+  const min = w.config.planner.rules.minLegumeMeals;
+  for (const profile of [FICTIVE, null]) {
+    const ctx = plannerCtx(w, profile);
+    for (const seed of SEEDS.slice(0, 15)) {
+      const plan = P.generateWeek(ctx, { seed });
+      for (let i = 0; i < plan.days.length; i += 1) {
+        const others = (p) => p.days.filter((_, j) => j !== i);
+        if (plan.days[i].dayType !== 'cheat') {
+          const cheat = P.setDayType(ctx, plan, i, 'cheat', { seed });
+          const view = P.viewPlan(ctx, cheat);
+          assert.deepEqual(others(cheat), others(plan), `graine ${seed}, jour ${i} → cheat : les autres jours ne bougent pas`);
+          const count = legumes(view, w.config).meals;
+          assert.equal(codes(view).includes('legume'), count < min, `graine ${seed}, jour ${i} → cheat : avertissement si et seulement si sous le minimum`);
+        }
+        const longue = P.setDayType(ctx, plan, i, 'longue', { seed: seed + 1 });
+        if (longue === plan) continue;
+        assert.deepEqual(others(longue), others(plan), `graine ${seed}, jour ${i} → longue : les autres jours ne bougent pas`);
+        assert.ok(legumes(P.viewPlan(ctx, longue), w.config).meals >= min, `graine ${seed}, jour ${i} → longue`);
+      }
+    }
+  }
+});
+
+test('regenerateDay : le jour tiré reçoit directement la légumineuse qui manque à la semaine, sans toucher aux autres jours', async () => {
+  const w = await world();
+  const min = w.config.planner.rules.minLegumeMeals;
+  // la plupart des déjeuners du recueil contiennent une légumineuse : on neutralise celles au-delà des huit premières pour qu'il existe des alternatives
+  let n = 0;
+  const meals = w.meals.map((m) => (P.isLegume(m, w.config) && (n += 1) > 8
+    ? { ...m, lines: m.lines.map((l) => (l.food?.type === w.config.planner.rules.legumeType ? { ...l, food: { ...l.food, type: w.config.foodTypes.find((t) => t !== w.config.planner.rules.legumeType) } } : l)) }
+    : m));
+  const ctx = plannerCtx(w, FICTIVE, { meals });
+  const plan = P.generateWeek(ctx, { seed: 4 });
+  const isLeg = (id) => P.isLegume(ctx.mealIdx.get(id), w.config);
+  // retire les légumineuses d'un jour (repas remplacés par des repas sans légumineuse du même créneau) ; faux si impossible
+  const strip = (copy, i) => {
+    const accepted = P.contextsFor(w.config, P.dayTypeOf(w.config, copy.days[i].dayType));
+    copy.days[i].meals = copy.days[i].meals.map(([slot, id]) => {
+      if (!isLeg(id)) return [slot, id];
+      const swap = ctx.meals.find((m) => m.category === slot && !m.cheat && !P.isLegume(m, w.config) && m.contexts.some((c) => accepted.includes(c)));
+      return swap ? [slot, swap.id] : [slot, id];
+    });
+    return !copy.days[i].meals.some(([, id]) => isLeg(id));
+  };
+  const withLegume = plan.days.map((d, i) => i).filter((i) => plan.days[i].dayType !== 'cheat' && plan.days[i].meals.some(([, id]) => isLeg(id)));
+  let done = 0;
+  for (const target of withLegume) {
+    // la semaine de départ n'a que `min - 2` repas à légumineuses hors du jour tiré : le jour tiré doit en recevoir une, seul
+    const thin = JSON.parse(JSON.stringify(plan));
+    if (!strip(thin, target)) continue;
+    for (const j of withLegume.filter((x) => x !== target)) if (P.viewPlan(ctx, thin).week.legumes.count > min - 2) strip(thin, j);
+    if (P.viewPlan(ctx, thin).week.legumes.count !== min - 2) continue;
+    const next = P.regenerateDay(ctx, thin, target, { seed: 12 });
+    assert.deepEqual(next.days.filter((_, j) => j !== target), thin.days.filter((_, j) => j !== target), `jour ${target} : les autres jours ne bougent pas`);
+    assert.ok(next.days[target].meals.some(([, id]) => isLeg(id)), `jour ${target} : le jour regénéré contient directement une légumineuse`);
+    done += 1;
+  }
+  assert.ok(done > 0, 'au moins un cas de test construit');
+});
+
 test('toute combinaison de types de journée donne un planning lisible : règles tenues ou avertissement, jamais d\'exception', async () => {
   const w = await world();
   const ctx = plannerCtx(w);
@@ -311,13 +397,52 @@ test('contrainte impossible : sans saumon dans le recueil → avertissement, le 
   assert.ok(view.days.every((d) => d.items.length === P.slotsFor(w.config, d.dayType).length));
 });
 
-test('contrainte impossible : sans légumineuses → avertissement chaque jour (hors cheat meal)', async () => {
+test('contrainte impossible : sans légumineuses → un seul avertissement, de semaine (pas un par jour)', async () => {
   const w = await world();
   const meals = w.meals.filter((m) => !P.isLegume(m, w.config));
   const ctx = plannerCtx(w, FICTIVE, { meals });
   const view = P.viewPlan(ctx, P.generateWeek(ctx, { seed: 6 }));
-  assert.equal(view.warnings.filter((x) => x.code === 'legume').length, 6);
-  assert.ok(view.warnings.filter((x) => x.code === 'legume').every((x) => x.day !== 'Mercredi'));
+  const legume = view.warnings.filter((x) => x.code === 'legume');
+  assert.equal(legume.length, 1);
+  assert.equal(legume[0].day, null);
+  assert.deepEqual(view.week.legumes, { count: 0, min: 4 });
+  assert.match(legume[0].text, /Aucun repas avec légumineuses cette semaine \(minimum 4\)/);
+});
+
+test('légumineuses : sous le minimum, un seul avertissement de semaine qui donne le nombre de repas', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  const plan = P.generateWeek(ctx, { seed: 6 });
+  const idx = new Map(w.meals.map((m) => [m.id, m]));
+  const other = w.meals.filter((m) => !P.isLegume(m, w.config));
+  // retire les repas à légumineuses d'un planning en les remplaçant par un repas sans légumineuse de la même catégorie, sauf trois d'entre eux
+  let kept = 0;
+  const thin = JSON.parse(JSON.stringify(plan));
+  for (const d of thin.days) d.meals = d.meals.map(([slot, id]) => {
+    if (!P.isLegume(idx.get(id), w.config) || (kept < 3 && (kept += 1))) return [slot, id];
+    return [slot, other.find((m) => m.category === slot && !m.cheat)?.id ?? id];
+  });
+  const view = P.viewPlan(ctx, thin);
+  assert.equal(view.week.legumes.count, 3);
+  const legume = view.warnings.filter((x) => x.code === 'legume');
+  assert.equal(legume.length, 1);
+  assert.equal(legume[0].text, 'Seulement 3 repas avec légumineuses cette semaine (minimum 4).');
+});
+
+test('légumineuses : minLegumeMeals est lu dans la config (0 : aucune exigence ni avertissement ; 2 : deux jours suffisent)', async () => {
+  const w = await world();
+  const meals = w.meals.filter((m) => !P.isLegume(m, w.config));
+  const none = plannerCtx(w, FICTIVE, { meals });
+  const cfg = (n) => ({ ...w.config, planner: { ...w.config.planner, rules: { ...w.config.planner.rules, minLegumeMeals: n } } });
+  const zero = { ...none, config: cfg(0) };
+  assert.ok(!codes(P.viewPlan(zero, P.generateWeek(zero, { seed: 6 }))).includes('legume'));
+  const two = { ...plannerCtx(w, FICTIVE), config: cfg(2) };
+  for (const seed of SEEDS.slice(0, 20)) {
+    const view = P.viewPlan(two, P.generateWeek(two, { seed }));
+    const lg = legumes(view, w.config);
+    assert.ok(lg.meals >= 2 && lg.days >= 2, `graine ${seed}`);
+    assert.deepEqual(view.week.legumes, { count: lg.meals, min: 2 });
+  }
 });
 
 test('contrainte impossible : seuls des abats en dîner → un seul repas d\'abats, créneaux vides signalés', async () => {

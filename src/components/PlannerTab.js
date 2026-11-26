@@ -13,6 +13,7 @@ export default {
   setup() {
     const view = S.planView;
     const dayTypes = S.config.value.dayTypes;
+    const minLegume = S.config.value.planner.rules.minLegumeMeals;
     const sameAsTemplate = computed(() => !S.state.plan || S.state.plan.days.every((d, i) => d.dayType === S.plannerCtx.value.week[i]?.dayType));
     const warnings = (label) => view.value.warnings.filter((w) => w.day === label);
     // Écart signé, arrondi à l'unité comme tout l'affichage : jamais « -0 » ni « +0 ».
@@ -23,7 +24,7 @@ export default {
       if (S.addPlanDayToMyDay(d.index)) S.toast(`${d.label} ajouté à Ma journée.`);
     };
     return {
-      state: S.state, view, dayTypes, sameAsTemplate, warnings, sign, sheet, toMyDay, status: S.profileStatus, STATUS,
+      state: S.state, view, dayTypes, minLegume, sameAsTemplate, warnings, sign, sheet, toMyDay, status: S.profileStatus, STATUS,
       generate: () => S.generatePlan(), reset: () => S.generatePlan({ reset: true }), undo: () => { if (S.undoPlan()) S.toast('Dernière modification annulée.'); },
       regenerate: (d) => S.regeneratePlanDay(d.index), setType: S.setPlanDayType, copyList: S.copyShoppingList, profile: () => S.openDialog('profile'),
       kcal: C.fmtKcal, g: C.fmtG, fmtQty: C.fmtQty, unitOf: C.unitOf, n: (v) => C.fmtNum(v, v % 1 ? 2 : 0),
@@ -32,7 +33,7 @@ export default {
   template: `
     <section aria-labelledby="t-planner">
       <h2 id="t-planner">Planificateur de semaine</h2>
-      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée. Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses chaque jour, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue, aucun repas répété.</p>
+      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée. Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses au moins {{ minLegume }} fois dans la semaine, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue, aucun repas répété.</p>
       <p v-if="!status.complete" class="notice">Renseigne <button type="button" class="linklike" @click="profile">Mon profil</button> pour obtenir les budgets et les facteurs de portion (il manque : {{ status.missing.join(', ') }}). Sans profil, les repas sont tirés près d'une journée type, avec des portions ×1 et sans écart à la cible.</p>
 
       <div class="plan-actions">
@@ -91,6 +92,7 @@ export default {
           <h3 id="plan-sum-h" class="card-title">Bilan de la semaine</h3>
           <p><b>{{ kcal(view.week.total.kcal) }} kcal</b> · P {{ g(view.week.total.protein) }} g · G {{ g(view.week.total.carbs) }} g · L {{ g(view.week.total.fat) }} g · F {{ g(view.week.total.fiber) }} g</p>
           <p class="muted">Par jour en moyenne : {{ kcal(view.week.average) }} kcal · P {{ g(view.week.total.protein / view.days.length) }} g · G {{ g(view.week.total.carbs / view.days.length) }} g · L {{ g(view.week.total.fat / view.days.length) }} g · F {{ g(view.week.total.fiber / view.days.length) }} g</p>
+          <p>Légumineuses : <b>{{ view.week.legumes.count }} repas</b> (minimum {{ view.week.legumes.min }}).</p>
           <template v-if="view.week.expenditure !== null">
             <div class="bars"><bar label="Apports de la semaine" :value="view.week.total.kcal" :target="view.week.expenditure" unit="kcal" /></div>
             <p>Dépense de la semaine : {{ kcal(view.week.expenditure) }} kcal · <b>solde hebdomadaire {{ sign(view.week.balance) }} kcal</b> ({{ STATUS[view.week.status] }}).</p>
