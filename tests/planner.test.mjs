@@ -287,7 +287,7 @@ test('setDayType : un jour devient cheat meal (bloc fixe de 3 000 kcal) puis red
   assert.deepEqual(view.warnings, []);
 });
 
-test('setDayType : un jour passé en cheat meal (un jour ouvert en moins) garde le minimum de repas à légumineuses', async () => {
+test('setDayType : jamais d\'autre jour modifié ; vers un jour ordinaire le minimum de légumineuses est tenu, vers un cheat meal seul l\'avertissement signale un manque', async () => {
   const w = await world();
   const min = w.config.planner.rules.minLegumeMeals;
   for (const profile of [FICTIVE, null]) {
@@ -295,56 +295,58 @@ test('setDayType : un jour passé en cheat meal (un jour ouvert en moins) garde 
     for (const seed of SEEDS.slice(0, 15)) {
       const plan = P.generateWeek(ctx, { seed });
       for (let i = 0; i < plan.days.length; i += 1) {
-        if (plan.days[i].dayType === 'cheat') continue;
-        const view = P.viewPlan(ctx, P.setDayType(ctx, plan, i, 'cheat', { seed }));
-        assert.equal(view.days.filter((d) => d.fixed).length, 2);
-        assert.ok(legumes(view, w.config).meals >= min, `graine ${seed}, jour ${i} → cheat`);
-        assert.ok(!codes(view).includes('legume'), `graine ${seed}, jour ${i}`);
-        const longue = P.viewPlan(ctx, P.setDayType(ctx, plan, i, 'longue', { seed: seed + 1 }));
-        assert.ok(legumes(longue, w.config).meals >= min, `graine ${seed}, jour ${i} → longue`);
+        const others = (p) => p.days.filter((_, j) => j !== i);
+        if (plan.days[i].dayType !== 'cheat') {
+          const cheat = P.setDayType(ctx, plan, i, 'cheat', { seed });
+          const view = P.viewPlan(ctx, cheat);
+          assert.deepEqual(others(cheat), others(plan), `graine ${seed}, jour ${i} → cheat : les autres jours ne bougent pas`);
+          const count = legumes(view, w.config).meals;
+          assert.equal(codes(view).includes('legume'), count < min, `graine ${seed}, jour ${i} → cheat : avertissement si et seulement si sous le minimum`);
+        }
+        const longue = P.setDayType(ctx, plan, i, 'longue', { seed: seed + 1 });
+        if (longue === plan) continue;
+        assert.deepEqual(others(longue), others(plan), `graine ${seed}, jour ${i} → longue : les autres jours ne bougent pas`);
+        assert.ok(legumes(P.viewPlan(ctx, longue), w.config).meals >= min, `graine ${seed}, jour ${i} → longue`);
       }
     }
   }
 });
 
-test('setDayType : si le jour passé en cheat meal portait une légumineuse et que la semaine passe sous le minimum, un jour ouvert sans légumineuse en reçoit une', async () => {
+test('regenerateDay : le jour tiré reçoit directement la légumineuse qui manque à la semaine, sans toucher aux autres jours', async () => {
   const w = await world();
   const min = w.config.planner.rules.minLegumeMeals;
-  // recueil de test : la plupart des déjeuners du recueil contiennent une légumineuse, donc une semaine à quatre jours seulement n'existe
-  // pas sans répétition. Les repas à légumineuses au-delà des huit premiers deviennent neutres (type d'aliment sans légumineuse).
+  // la plupart des déjeuners du recueil contiennent une légumineuse : on neutralise celles au-delà des huit premières pour qu'il existe des alternatives
   let n = 0;
   const meals = w.meals.map((m) => (P.isLegume(m, w.config) && (n += 1) > 8
     ? { ...m, lines: m.lines.map((l) => (l.food?.type === w.config.planner.rules.legumeType ? { ...l, food: { ...l.food, type: w.config.foodTypes.find((t) => t !== w.config.planner.rules.legumeType) } } : l)) }
     : m));
   const ctx = plannerCtx(w, FICTIVE, { meals });
   const plan = P.generateWeek(ctx, { seed: 4 });
-  // semaine construite : exactement `min` jours avec une légumineuse, les autres jours ouverts sans (repas de remplacement jamais utilisés ailleurs)
-  const used = new Set(ids(plan));
-  const thin = JSON.parse(JSON.stringify(plan));
-  const open = thin.days.map((d, i) => i).filter((i) => thin.days[i].dayType !== 'cheat');
-  const keepDays = open.slice(0, min);
-  for (const i of open.slice(min)) {
-    thin.days[i].meals = thin.days[i].meals.map(([slot, id]) => {
-      if (!P.isLegume(ctx.mealIdx.get(id), w.config)) return [slot, id];
-      const swap = ctx.meals.find((m) => m.category === slot && !m.cheat && !P.isLegume(m, w.config) && !used.has(m.id) && m.contexts.some((c) => P.contextsFor(w.config, P.dayTypeOf(w.config, thin.days[i].dayType)).includes(c)));
-      used.add(swap.id);
-      return [slot, swap.id];
+  const isLeg = (id) => P.isLegume(ctx.mealIdx.get(id), w.config);
+  // retire les légumineuses d'un jour (repas remplacés par des repas sans légumineuse du même créneau) ; faux si impossible
+  const strip = (copy, i) => {
+    const accepted = P.contextsFor(w.config, P.dayTypeOf(w.config, copy.days[i].dayType));
+    copy.days[i].meals = copy.days[i].meals.map(([slot, id]) => {
+      if (!isLeg(id)) return [slot, id];
+      const swap = ctx.meals.find((m) => m.category === slot && !m.cheat && !P.isLegume(m, w.config) && m.contexts.some((c) => accepted.includes(c)));
+      return swap ? [slot, swap.id] : [slot, id];
     });
+    return !copy.days[i].meals.some(([, id]) => isLeg(id));
+  };
+  const withLegume = plan.days.map((d, i) => i).filter((i) => plan.days[i].dayType !== 'cheat' && plan.days[i].meals.some(([, id]) => isLeg(id)));
+  let done = 0;
+  for (const target of withLegume) {
+    // la semaine de départ n'a que `min - 2` repas à légumineuses hors du jour tiré : le jour tiré doit en recevoir une, seul
+    const thin = JSON.parse(JSON.stringify(plan));
+    if (!strip(thin, target)) continue;
+    for (const j of withLegume.filter((x) => x !== target)) if (P.viewPlan(ctx, thin).week.legumes.count > min - 2) strip(thin, j);
+    if (P.viewPlan(ctx, thin).week.legumes.count !== min - 2) continue;
+    const next = P.regenerateDay(ctx, thin, target, { seed: 12 });
+    assert.deepEqual(next.days.filter((_, j) => j !== target), thin.days.filter((_, j) => j !== target), `jour ${target} : les autres jours ne bougent pas`);
+    assert.ok(next.days[target].meals.some(([, id]) => isLeg(id)), `jour ${target} : le jour regénéré contient directement une légumineuse`);
+    done += 1;
   }
-  const before = P.viewPlan(ctx, thin);
-  assert.equal(before.days.filter((d) => !d.fixed && legumes({ days: [d] }, w.config).meals > 0).map((d) => d.index).sort().join(), keepDays.slice().sort().join());
-  assert.ok(before.week.legumes.count >= min);
-  const target = keepDays[0];
-  const next = P.setDayType(ctx, thin, target, 'cheat', { seed: 9 });
-  const view = P.viewPlan(ctx, next);
-  assert.equal(view.days[target].fixed, true);
-  assert.ok(view.week.legumes.count >= min, `${view.week.legumes.count} repas à légumineuses`);
-  assert.deepEqual(codes(view).filter((c) => c === 'legume'), []);
-  // un seul jour ouvert en plus a changé (le rattrapage s'arrête dès que le minimum est atteint), et les jours qui avaient une légumineuse n'ont pas bougé
-  const changed = next.days.map((d, j) => j).filter((j) => j !== target && JSON.stringify(next.days[j]) !== JSON.stringify(thin.days[j]));
-  assert.equal(changed.length, min - (before.week.legumes.count - 1) > 0 ? 1 : 0, `jours modifiés : ${changed}`);
-  for (const j of keepDays.slice(1)) assert.deepEqual(next.days[j], thin.days[j]);
-  assert.equal(new Set(ids(next)).size, ids(next).length, 'aucune répétition');
+  assert.ok(done > 0, 'au moins un cas de test construit');
 });
 
 test('toute combinaison de types de journée donne un planning lisible : règles tenues ou avertissement, jamais d\'exception', async () => {
