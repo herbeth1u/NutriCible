@@ -10,3 +10,4 @@ Aucune étape de build : les dépendances d'exécution sont copiées telles quel
 1. Choisir une version publiée depuis au moins deux semaines.
 2. Remplacer `vendor/vue.esm-browser.prod.js` par le fichier `dist/vue.esm-browser.prod.js` du paquet npm officiel (`npm pack vue@X.Y.Z`, puis extraire `package/dist/vue.esm-browser.prod.js`).
 3. Mettre à jour la version et l'empreinte SHA-256 ci-dessus (`sha256sum vendor/vue.esm-browser.prod.js`).
+4. Lancer `npm test` : `tests/docs.test.mjs` vérifie que le fichier est présent, que son empreinte correspond à celle-ci et que sa bannière annonce la même version.
