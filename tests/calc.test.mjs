@@ -242,7 +242,8 @@ test('cheat meal : bloc unique aux macros stockées, sans tags automatiques', as
 
 test('avertissement kcal/macros : non bloquant, désactivable', async () => {
   const w = await world();
-  assert.ok(C.kcalWarning(w.foodIdx.get('fruits-rouges-surgeles').per100, w.config, w.foodIdx.get('fruits-rouges-surgeles')), 'étiquette incohérente signalée');
+  assert.ok(C.kcalWarning({ kcal: 100, protein: 1, carbs: 6, fat: 0, fiber: 3 }, w.config, {}), 'étiquette incohérente signalée');
+  assert.equal(C.kcalWarning(w.foodIdx.get('fruits-rouges-surgeles').per100, w.config, w.foodIdx.get('fruits-rouges-surgeles')), null, 'fruits rouges surgelés : kcal cohérentes avec les macros');
   assert.equal(C.kcalWarning(w.foodIdx.get('electrolytes').per100, w.config, w.foodIdx.get('electrolytes')), null);
   assert.equal(C.kcalWarning(w.foodIdx.get('banane').per100, w.config, w.foodIdx.get('banane')), null);
   assert.equal(C.kcalWarning({ kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 }, w.config), null);
