@@ -168,7 +168,11 @@ export function mergeBackup(current, incoming, strategy = 'keep', reserved = {})
   // « Ma journée » et planning : suivent les repas renommés ; une sauvegarde qui n'en contient pas (null) ne remplace rien ;
   // en mode « garder l'existant », l'importé ne prend la place que d'une journée vide ou d'une absence de planning.
   if (incoming.day && (strategy !== 'keep' || !user.day?.items.length)) user.day = { ...incoming.day, items: incoming.day.items.map((it) => ({ ...it, meal: remap(it.meal) })) };
-  if (incoming.plan && (strategy !== 'keep' || !user.plan)) user.plan = { ...incoming.plan, days: incoming.plan.days.map((d) => ({ ...d, meals: d.meals.map(([slot, id]) => [slot, remap(id)]) })) };
+  // Les repas retirés (`removed`) suivent les repas renommés comme les repas du planning (`meals`).
+  if (incoming.plan && (strategy !== 'keep' || !user.plan)) {
+    const remapPairs = (list) => (list ?? []).map(([slot, id]) => [slot, remap(id)]);
+    user.plan = { ...incoming.plan, days: incoming.plan.days.map((d) => ({ ...d, meals: remapPairs(d.meals), removed: remapPairs(d.removed) })) };
+  }
 
   // Semaine type : l'importée l'emporte quand elle est personnalisée ; en mode « garder l'existant », seulement si l'existante est celle d'origine.
   if (incoming.week && (strategy !== 'keep' || !user.week)) user.week = [...incoming.week];
