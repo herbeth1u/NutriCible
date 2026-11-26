@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { APP, FORMAT, backupFileName, emptyUser, mergeBackup, migrate, parseBackup, sanitizeUser, serialize } from '../src/backup.js';
+import { APP, FORMAT, MIGRATIONS, backupFileName, emptyUser, mergeBackup, migrate, parseBackup, sanitizeUser, serialize } from '../src/backup.js';
 import { FICTIVE } from './helpers.mjs';
 
 const food = (id, name, kcal = 100) => ({ id, name, type: 'Autres', state: 'tel quel', unit: 'g', per100: { kcal, protein: 5, carbs: 10, fat: 2, fiber: 1 }, estimated: false });
@@ -150,14 +150,16 @@ test('fusion : ne modifie pas les objets passés en paramètre', () => {
 
 // ------------------------------------------------------------------ format 2 : « Ma journée » et planning de la semaine
 const day = (items = [{ meal: 'col-fb-noix-miel', base: 1 }, { meal: 'perso-m1', base: 0.75, own: 1.5 }], o = {}) => ({ dayType: 'courte', global: 1.15, items, ...o });
+const WEEK = ['j-repos', 'j-courte', 'j-moyenne', 'j-longue', 'j-dimanche', 'j-veille-longue', 'j-cheat'];
 const plan = (o = {}) => ({ v: 1, seed: 42, days: [{ label: 'Lundi', dayType: 'courte', seed: 7, meals: [['Dîner', 'perso-m1'], ['Déjeuner', 'dej-pois-casses-poulet']] }, { label: 'Mardi', dayType: 'cheat', seed: 8, meals: [['Repas plaisir', 'pla-cheat-buffet']] }], ...o });
 
-test('format 2 : le format courant est 2 et le fichier contient « Ma journée » et le planning', () => {
-  assert.equal(FORMAT, 2);
-  const f = JSON.parse(serialize(user({ day: day(), plan: plan() })));
-  assert.equal(f.format, 2);
+test('format 3 : le format courant est 3 et le fichier contient « Ma journée », le planning et la semaine type', () => {
+  assert.equal(FORMAT, 3);
+  const f = JSON.parse(serialize(user({ day: day(), plan: plan(), week: WEEK })));
+  assert.equal(f.format, 3);
   assert.deepEqual(f.data.day, day());
   assert.deepEqual(f.data.plan, plan());
+  assert.deepEqual(f.data.week, WEEK);
 });
 
 test('format 2 : aller-retour sans perte de « Ma journée » (facteurs propres compris) et du planning (graines comprises)', () => {
@@ -181,6 +183,7 @@ test('format 2 : une sauvegarde de format 1 est migrée (pas de « Ma journée �
   assert.equal(r.data.profile.age, FICTIVE.age);
   assert.deepEqual(migrate(v1).day, null);
   assert.deepEqual(migrate({ app: APP, format: 0, data: {} }).plan, null, 'la migration enchaîne 0 → 1 → 2');
+  assert.equal(r.data.week, null, '… et 2 → 3');
 });
 
 test('format 2 : relecture sûre de « Ma journée » et du planning (valeurs invalides écartées)', () => {
@@ -227,4 +230,56 @@ test('fusion format 2 : « Ma journée » et le planning suivent les repas perso
   const keep = mergeBackup(cur, inc, 'keep').user;
   assert.deepEqual(keep.day.items.map((it) => it.meal), ['m1', 'col-fb-noix-miel'], 'fusionné avec le repas existant');
   assert.deepEqual(keep.plan.days[0].meals, [['Dîner', 'm1']]);
+});
+
+// ------------------------------------------------------------------ format 3 : semaine type modifiable
+test('format 3 : une sauvegarde de format 2 est migrée (semaine type d\'origine = null, rien d\'autre ne change)', () => {
+  const v2 = { app: APP, format: 2, exportedAt: '2026-11-20T10:00:00.000Z', data: { profile: { ...FICTIVE }, meals: [meal('m', 'Ok')], foods: [], foodEdits: {}, deletedFoods: [], replacements: {}, day: day(), plan: plan() } };
+  assert.equal(migrate(v2).week, null);
+  const r = parseBackup(JSON.stringify(v2));
+  assert.equal(r.ok, true);
+  assert.equal(r.data.week, null);
+  assert.deepEqual(r.data.day, day());
+  assert.deepEqual(r.data.plan, plan());
+  assert.deepEqual(r.data.meals.map((m) => m.id), ['m']);
+  assert.deepEqual(MIGRATIONS[2]({ week: WEEK }).week, WEEK, 'une semaine déjà présente est gardée');
+  assert.equal(migrate({ app: APP, format: 0, data: {} }).week, null);
+});
+
+test('format 3 : aller-retour sans perte de la semaine type, avec ou sans personnalisation', () => {
+  for (const week of [WEEK, null]) {
+    const u = user({ profile: { ...FICTIVE }, week });
+    const r = parseBackup(serialize(u));
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.data, u);
+    assert.deepEqual(r.data.week, week);
+  }
+  assert.equal(emptyUser().week, null);
+});
+
+test('format 3 : relecture sûre de la semaine type (7 chaînes, sinon null)', () => {
+  assert.deepEqual(sanitizeUser({ week: WEEK }).week, WEEK);
+  assert.notEqual(sanitizeUser({ week: WEEK }).week, WEEK, 'copie, pas la même liste');
+  for (const bad of [undefined, null, 'j-repos', {}, WEEK.slice(0, 6), [...WEEK, 'j-repos'], [...WEEK.slice(0, 6), 3], [...WEEK.slice(0, 6), null]]) {
+    assert.equal(sanitizeUser({ week: bad }).week, null, JSON.stringify(bad));
+  }
+});
+
+test('fusion format 3 : tout remplacer reprend la semaine type de la sauvegarde (null = semaine d\'origine)', () => {
+  const cur = user({ week: WEEK });
+  const other = [...WEEK].reverse();
+  assert.deepEqual(mergeBackup(cur, user({ week: other }), 'replace-all').user.week, other);
+  assert.equal(mergeBackup(cur, user(), 'replace-all').user.week, null);
+});
+
+test('fusion format 3 : « garder l\'existant » ne remplace qu\'une semaine d\'origine ; « remplacer » et « renommer » prennent l\'importée ; null ne remplace rien', () => {
+  const mine = [...WEEK].reverse();
+  const inc = user({ week: WEEK });
+  assert.deepEqual(mergeBackup(user({ week: mine }), inc, 'keep').user.week, mine, 'personnalisée : gardée');
+  assert.deepEqual(mergeBackup(user(), inc, 'keep').user.week, WEEK, 'semaine d\'origine : l\'importée prend la place');
+  for (const strategy of ['replace', 'rename']) assert.deepEqual(mergeBackup(user({ week: mine }), inc, strategy).user.week, WEEK, strategy);
+  for (const strategy of ['keep', 'replace', 'rename']) assert.deepEqual(mergeBackup(user({ week: mine }), user(), strategy).user.week, mine, `${strategy} : sauvegarde sans semaine type`);
+  const cur = user({ week: mine });
+  mergeBackup(cur, inc, 'replace');
+  assert.deepEqual(cur.week, mine, 'l\'existant n\'est pas modifié');
 });
