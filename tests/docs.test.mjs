@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir, access } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,6 +34,24 @@ test('Vue ne s\'importe que via src/vue.js ; le stockage n\'est touché que par 
   }
   assert.match(await read('src/store.js'), /PREFIX = 'nutricible:v1:'/);
   assert.match(await read('src/vue.js'), /vendor\/vue\.esm-browser\.prod\.js/);
+});
+
+test('Vue est vendorisé : fichier présent, empreinte conforme à VERSIONS.md, aucun repli CDN', async () => {
+  assert.ok(await exists('vendor/vue.esm-browser.prod.js'), 'vendor/vue.esm-browser.prod.js doit être dans le dépôt');
+  const versions = await read('vendor/VERSIONS.md');
+  const v = versions.match(/^- vue (\d+\.\d+\.\d+)/m);
+  const sha = versions.match(/sha256 : ([0-9a-f]{64})/);
+  assert.ok(v && sha, 'version et empreinte attendues dans VERSIONS.md');
+  const buf = await readFile(join(ROOT, 'vendor/vue.esm-browser.prod.js'));
+  assert.equal(createHash('sha256').update(buf).digest('hex'), sha[1], 'empreinte SHA-256 différente de VERSIONS.md');
+  assert.ok(buf.subarray(0, 200).toString('utf8').includes(`vue v${v[1]}`), 'la bannière du fichier doit annoncer la version de VERSIONS.md');
+  const loader = await read('src/vue.js');
+  assert.ok(!/https?:\/\/|jsdelivr|unpkg|catch/.test(loader), 'src/vue.js ne doit contenir aucun repli réseau');
+  assert.ok(!/<(script|link)\b[^>]*\b(src|href)="https?:\/\//.test(await read('index.html')), 'index.html : aucune ressource externe');
+  for (const f of (await walk('src')).filter((x) => x.endsWith('.js'))) {
+    const t = await read(f);
+    assert.ok(!/from\s+['"]https?:/.test(t) && !/import\(\s*['"]https?:/.test(t), `${f} : import depuis une URL`);
+  }
 });
 
 test("affichage à l'unité : plus de roundKcal ni de roundG dans src/, un seul formateur pour les kcal et macros", async () => {
@@ -77,7 +96,7 @@ test('documentation : plus de référence au dossier github-workflows/ (les work
   assert.ok((await read('CLAUDE.md')).includes('.github/workflows/'));
 });
 
-test('hygiène du dépôt : .nojekyll, .gitignore des sauvegardes, scripts npm, Vue épinglé avec empreinte', async () => {
+test('hygiène du dépôt : .nojekyll, .gitignore des sauvegardes, scripts npm, version de Vue et empreinte renseignées', async () => {
   assert.ok(await exists('.nojekyll'));
   const ignore = await read('.gitignore');
   assert.match(ignore, /nutricible-sauvegarde\*\.json/);
@@ -90,7 +109,6 @@ test('hygiène du dépôt : .nojekyll, .gitignore des sauvegardes, scripts npm, 
   const versions = await read('vendor/VERSIONS.md');
   const v = versions.match(/^- vue (\d+\.\d+\.\d+)/m);
   assert.ok(v && /sha256 : [0-9a-f]{64}/.test(versions));
-  assert.match(await read('src/vue.js'), new RegExp(`vue@${v[1].replace(/\./g, '\\.')}/dist`), 'le repli CDN est épinglé à la version vendorisée');
 });
 
 test('workflows fournis : CI (validation et tests) et vendorisation', async () => {

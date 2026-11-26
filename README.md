@@ -112,7 +112,9 @@ Les tests couvrent notamment : macros et arrondis, conversion cru/cuit, aliments
 
 ### Vue vendorisée
 
-Vue 3 est copié tel quel dans `vendor/vue.esm-browser.prod.js` (build ESM navigateur avec compilateur), version exacte et empreinte SHA-256 dans `vendor/VERSIONS.md`. Toute l'application importe Vue via `src/vue.js`. **Tant que le fichier vendorisé n'est pas dans le dépôt, `src/vue.js` bascule sur le même build servi par un CDN, épinglé à la version exacte** : le site fonctionne dès le premier déploiement. Pour vendoriser :
+Vue 3 est copié tel quel dans `vendor/vue.esm-browser.prod.js` (build ESM navigateur avec compilateur), version exacte et empreinte SHA-256 dans `vendor/VERSIONS.md`. Toute l'application importe Vue via `src/vue.js`, **sans repli CDN** : aucune requête externe, l'application démarre de la même façon hors ligne. Un test (`tests/docs.test.mjs`) vérifie que le fichier est présent et que son empreinte correspond à `VERSIONS.md`.
+
+Pour mettre à jour ou re-vendoriser :
 
 ```
 npm pack vue@3.5.44
