@@ -630,7 +630,7 @@ test('modèle du planning : generateWeek et sanitizePlan produisent la même for
   const view = P.viewPlan(ctx, plan);
   assert.equal(view.week.adjust, 1);
   assert.ok(!('seed' in view), 'la graine n\'est plus exposée à l\'interface');
-  for (const d of view.days) { assert.equal(d.mult, 1); assert.equal(d.base, d.factor); assert.equal(d.goal, d.budget); assert.deepEqual(d.removedItems, []); }
+  for (const d of view.days) { assert.equal(d.mult, 1); assert.equal(d.base, d.factor); assert.ok(!('goal' in d)); assert.deepEqual(d.removedItems, []); }
 });
 
 test('sanitizePlan : anciennes formes, valeurs hors plage (bornées par config.planner.adjust), removed invalide', async () => {
@@ -757,7 +757,7 @@ test('retrait : le repas du cheat meal retiré ne déplace pas les budgets des a
   near(assert, v.days[i].basis.kcal, v.days[i].totals.kcal, 1e-9);
 });
 
-test('curseurs : factor = r2(base × semaine × jour) borné à [0,5 ; 2], jour fixe inchangé, d.factor invariant par clampFactor, goal = budget × ajustements', async () => {
+test('curseurs : factor = r2(base × semaine × jour) borné à [0,5 ; 2], jour fixe inchangé, d.factor invariant par clampFactor, écart toujours par rapport au budget', async () => {
   const w = await world();
   const ctx = plannerCtx(w, FICTIVE);
   for (const seed of SEEDS.slice(0, 10)) {
@@ -775,29 +775,27 @@ test('curseurs : factor = r2(base × semaine × jour) borné à [0,5 ; 2], jour 
           assert.equal(d.factor, 1, where);
           assert.equal(d.mult, 1, where);
           near(assert, d.adjusted.kcal, r.adjusted.kcal, 1e-9);
-          near(assert, d.goal, r.budget, 1e-9);
           near(assert, d.delta, r.delta, 1e-9);
           continue;
         }
         near(assert, d.base, r.base, 1e-12);
         near(assert, d.mult, wk * dk, 1e-12);
         near(assert, d.factor, Math.min(2, Math.max(0.5, r2(d.base * wk * dk))), 1e-12);
-        near(assert, d.goal, d.budget * wk * dk, 1e-6);
-        near(assert, d.delta, d.adjusted.kcal - d.goal, 1e-9);
+        assert.ok(!('goal' in d), 'plus de cible ajustée');
+        near(assert, d.delta, d.adjusted.kcal - d.budget, 1e-9);
         near(assert, d.adjusted.kcal, d.totals.kcal * d.factor, 1e-6);
       }
     }
   }
 });
 
-test('curseurs : sans profil, le facteur ne vient que des ajustements ; sans budget ni cible ajustée', async () => {
+test('curseurs : sans profil, le facteur ne vient que des ajustements ; sans budget ni écart', async () => {
   const w = await world();
   const ctx = plannerCtx(w, null);
   const plan = P.generateWeek(ctx, { seed: 3 });
   const view = P.viewPlan(ctx, withAdjust(plan, 0.9, allDays(plan, 1.1)));
   for (const d of view.days) {
     assert.equal(d.base, 1);
-    assert.equal(d.goal, null);
     assert.equal(d.delta, null);
     assert.equal(d.factor, d.fixed ? 1 : r2(0.9 * 1.1));
   }
@@ -827,7 +825,7 @@ test('curseur de la semaine : le solde de la semaine est proportionnel au curseu
   assert.ok(checked > 20, `${checked} cas vérifiés`);
 });
 
-test('curseurs : kcal-gap se compare à la cible ajustée (goal), pas au budget', async () => {
+test('curseurs : kcal-gap se compare au budget et n\'est pas émis quand l\'écart est voulu (curseur ≠ ×1)', async () => {
   const w = await world();
   const ctx = plannerCtx(w, FICTIVE);
   let checked = 0;
@@ -836,8 +834,7 @@ test('curseurs : kcal-gap se compare à la cible ajustée (goal), pas au budget'
     const view = P.viewPlan(ctx, withAdjust(plan, 1.2));
     if (view.days.some((d) => !d.fixed && (d.factor === 0.5 || d.factor === 2))) continue;
     for (const d of view.days.filter((x) => !x.fixed)) {
-      assert.ok(Math.abs(d.adjusted.kcal - d.budget) > w.config.planner.gapWarning * d.budget, 'l\'ancienne comparaison au budget aurait signalé un écart');
-      assert.ok(Math.abs(d.delta) <= w.config.planner.gapWarning * d.goal, `${d.label} : écart à la cible ajustée`);
+      assert.ok(Math.abs(d.delta) > w.config.planner.gapWarning * d.budget, `${d.label} : l'écart au budget dépasse le seuil`);
     }
     assert.ok(!codes(view).includes('kcal-gap'), `graine ${seed}`);
     checked += 1;
@@ -855,7 +852,7 @@ test('curseurs : un ajustement hors d\'atteinte (facteur borné) reste signalé 
   assert.ok(codes(view).includes('kcal-gap'));
 });
 
-test('« Réaligner sur la cible » : après un retrait, l\'ajustement du jour ramène les apports sur budget × ajustement de la semaine', async () => {
+test('« Réaligner sur la cible » : après un retrait, l\'ajustement du jour ramène les apports sur la cible de maintien, quel que soit le curseur de la semaine', async () => {
   const w = await world();
   const ctx = plannerCtx(w, FICTIVE);
   let checked = 0;
@@ -870,7 +867,8 @@ test('« Réaligner sur la cible » : après un retrait, l\'ajustement du jour r
         assert.ok(adj >= w.config.planner.adjust.day.min && adj <= w.config.planner.adjust.day.max);
         const d = P.viewPlan(ctx, withAdjust(removed, wk, { [i]: adj })).days[i];
         if (d.factor === 0.5 || d.factor === 2 || adj === 2) continue; // borné : la cible n'est pas atteignable
-        near(assert, d.adjusted.kcal, d.budget * wk, 0.011 * d.budget);
+        near(assert, d.adjusted.kcal, d.budget, 0.011 * d.budget);
+        near(assert, d.delta, 0, 0.011 * d.budget);
         checked += 1;
       }
     }
