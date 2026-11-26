@@ -33,7 +33,7 @@ export default {
   template: `
     <section aria-labelledby="t-planner">
       <h2 id="t-planner">Planificateur de semaine</h2>
-      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée. Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses au moins {{ minLegume }} fois dans la semaine, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue, aucun repas répété.</p>
+      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée (la semaine type se règle dans l'onglet Cibles et hypothèses). Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses au moins {{ minLegume }} fois dans la semaine, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue, aucun repas répété.</p>
       <p v-if="!status.complete" class="notice">Renseigne <button type="button" class="linklike" @click="profile">Mon profil</button> pour obtenir les budgets et les facteurs de portion (il manque : {{ status.missing.join(', ') }}). Sans profil, les repas sont tirés près d'une journée type, avec des portions ×1 et sans écart à la cible.</p>
 
       <div class="plan-actions">
@@ -42,6 +42,8 @@ export default {
         <button v-if="state.plan" type="button" class="btn" :disabled="sameAsTemplate" title="Remet les types de journée de la semaine type et tire de nouveaux repas" @click="reset">Semaine type</button>
         <small v-if="view" class="muted">Graine du tirage : {{ view.seed }} (la même graine redonne la même semaine).</small>
       </div>
+
+      <p v-if="!sameAsTemplate" class="muted small">Cette semaine ne suit pas ta semaine type : « Semaine type » la rétablit.</p>
 
       <p v-if="!view" class="empty">Aucune semaine pour l'instant : « Générer une nouvelle semaine » tire les repas de chaque jour. Le planning est enregistré dans ce navigateur et dans la sauvegarde JSON.</p>
 
