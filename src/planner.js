@@ -1,15 +1,21 @@
 // src/planner.js — planificateur de semaine : fonctions pures (aucun DOM, aucun Vue, aucun stockage).
 //
-// Une semaine planifiée (`plan`) ne stocke que des choix : la graine du tirage, et pour chaque jour son type, sa propre
-// graine et ses repas `[créneau, identifiant de repas]`. Aucun total n'est stocké : budget, facteur de portion, écart,
-// bilan, avertissements et liste de courses sont recalculés à la volée (`viewPlan`) depuis les repas, le profil et la config.
+// Une semaine planifiée (`plan`) ne stocke que des choix : la graine du tirage, les ajustements de portions et, pour chaque
+// jour, son type, sa propre graine, son ajustement, ses repas `[créneau, identifiant de repas]` et ses repas retirés.
+// Aucun total n'est stocké : budget, facteur de portion, écart, bilan, avertissements et liste de courses sont recalculés
+// à la volée (`viewPlan`) depuis les repas, le profil et la config.
 //
-//   plan = { v: 1, seed, days: [{ label, dayType, seed, meals: [[créneau, idRepas], …] }] }
+//   plan = { v: 1, seed, adjust: 1,
+//            days: [{ label, dayType, seed, adjust: 1, meals: [[créneau, idRepas], …], removed: [[créneau, idRepas], …] }] }
+//
+// Un repas retiré reste dans `removed` : il compte pour le facteur de portion et le budget du jour (`basis`), mais plus pour
+// les apports, le bilan, la liste de courses ni « Ma journée » ; il peut être rétabli. `adjust` (semaine, jour) multiplie le
+// facteur calculé par le planificateur ; il ne s'applique pas aux jours fixes (cheat meal).
 //
 // Tirage : générateur pseudo-aléatoire à graine (mulberry32). Même graine + mêmes données = même semaine, ce qui permet
-// de la reproduire et de la tester. Pour chaque jour, plusieurs tirages sont comparés et le meilleur est gardé ; le facteur
-// de portion global (calc.fitFactor) ramène ensuite le jour à son budget. Toutes les règles et tous les seuils sont dans
-// config.json (bloc `planner`), jamais en dur ici.
+// de la reproduire et de la tester ; la graine reste interne (jamais affichée). Pour chaque jour, plusieurs tirages sont
+// comparés et le meilleur est gardé ; le facteur de portion (calc.fitFactor) ramène ensuite le jour à son budget. Toutes les
+// règles et tous les seuils sont dans config.json (bloc `planner`), jamais en dur ici.
 //
 // Règles dures : au moins `minLegumeMeals` repas avec une légumineuse dans la semaine (placés sur autant de jours différents),
 // saumon au moins une fois, abats au plus une fois par semaine, lait + cacao sucré seulement les jours de sortie moyenne ou
@@ -19,7 +25,8 @@
 // Le contexte `ctx` : { meals (repas résolus par calc.resolveMeal), mealIdx?, config, targets (calc.allTargets ou null),
 // week (semaine type : [{ label, dayType }]), reference? ({ [typeDeJournée]: kcal }, pour choisir sans profil) }.
 
-import { convertQty, fitFactor, fmtKcal, fmtNum, fmtQty, isConvertible, scale, sum, unitOf } from './calc.js';
+import { add, convertQty, fitFactor, fmtKcal, fmtNum, fmtQty, isConvertible, scale, sum, unitOf } from './calc.js';
+import { clampFactor, FACTOR_MAX, FACTOR_MIN } from './day.js';
 import { weekBudget } from './week.js';
 
 export const PLAN_VERSION = 1;
@@ -250,14 +257,26 @@ export function planBudgets(ctx, plan) {
   const rows = plan.days.map((d) => {
     const t = ctx.targets[d.dayType];
     const fixed = isFixedType(ctx.config, d.dayType);
-    const kcal = fixed ? d.meals.reduce((s, [, id]) => s + (idx.get(id)?.totals.kcal ?? 0), 0) : 0;
+    // Jour fixe : ses kcal sont celles de tous ses repas, retirés compris (retirer le cheat meal ne déplace pas les autres budgets).
+    const kcal = fixed ? [...d.meals, ...(d.removed ?? [])].reduce((s, [, id]) => s + (idx.get(id)?.totals.kcal ?? 0), 0) : 0;
     return { expenditure: t.expenditure, target: t.kcal, fixed, fixedKcal: kcal > 0 ? kcal : t.kcal };
   });
   return weekBudget(rows, { floor: ctx.config.planner.floor });
 }
 
 // ------------------------------------------------------------------ génération
-const clonePlan = (plan) => ({ ...plan, days: plan.days.map((d) => ({ ...d, meals: d.meals.map((m) => [...m]) })) });
+const clonePlan = (plan) => ({ ...plan, days: plan.days.map((d) => ({ ...d, meals: d.meals.map((m) => [...m]), removed: (d.removed ?? []).map((m) => [...m]) })) });
+
+// ------------------------------------------------------------------ ajustements de portions
+const snap = (v, step) => Math.round(Math.round(v / step) * step * 1e6) / 1e6;
+/** Borne un ajustement (`scope` : 'week' ou 'day') aux plages de `adjust` (config.planner.adjust), au pas près. */
+export function clampAdjustWith(adjust, scope, v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  const { min, max } = adjust[scope];
+  return Math.min(max, Math.max(min, snap(n, adjust.step)));
+}
+export const clampAdjust = (config, scope, v) => clampAdjustWith(config.planner.adjust, scope, v);
 
 /**
  * Génère une semaine. `dayTypes` : types de journée de chaque jour (par défaut ceux de la semaine type).
@@ -268,8 +287,8 @@ export function generateWeek(ctx, { seed = 1, dayTypes = null } = {}) {
   const { config } = ctx;
   const s = uint(seed);
   const plan = {
-    v: PLAN_VERSION, seed: s,
-    days: ctx.week.map((w, i) => ({ label: w.label, dayType: dayTypes?.[i] ?? w.dayType, seed: mixSeed(s, i + 1), meals: [] })),
+    v: PLAN_VERSION, seed: s, adjust: 1,
+    days: ctx.week.map((w, i) => ({ label: w.label, dayType: dayTypes?.[i] ?? w.dayType, seed: mixSeed(s, i + 1), adjust: 1, meals: [], removed: [] })),
   };
   const dts = plan.days.map((d) => dayTypeOf(config, d.dayType));
   const none = { used: new Set(), offal: 0, salmon: 0 };
@@ -305,6 +324,7 @@ function redrawDay(ctx, plan, index) {
   const day = plan.days[index];
   const dt = dayTypeOf(ctx.config, day.dayType);
   day.meals = [];
+  day.removed = []; // un nouveau tirage repart de zéro : les repas retirés ne sont pas conservés
   const state = stateOf(ctx, plan, index);
   const fixed = isFixedType(ctx.config, day.dayType);
   const salmon = !fixed && state.salmon === 0 && canSalmon(ctx, dt, state); // le saumon de la semaine ne doit pas disparaître
@@ -313,7 +333,10 @@ function redrawDay(ctx, plan, index) {
   return plan;
 }
 
-/** Regénère un jour (les autres ne bougent pas). Sans `seed`, la graine suivante est dérivée de celle du jour. */
+/**
+ * Regénère un jour (les autres ne bougent pas). Sans `seed`, la graine suivante est dérivée de celle du jour.
+ * L'ajustement du jour est conservé ; les repas retirés sont vidés.
+ */
 export function regenerateDay(ctx, plan, index, { seed } = {}) {
   if (!plan.days[index]) return plan;
   const next = clonePlan(plan);
@@ -321,13 +344,64 @@ export function regenerateDay(ctx, plan, index, { seed } = {}) {
   return redrawDay(ctx, next, index);
 }
 
-/** Change le type d'un jour et le regénère : les budgets des autres jours changent, leurs repas non (leurs facteurs sont recalculés). */
+/**
+ * Change le type d'un jour et le regénère : les budgets des autres jours changent, leurs repas non (leurs facteurs sont recalculés).
+ * L'ajustement du jour repasse à ×1 et les repas retirés sont vidés.
+ */
 export function setDayType(ctx, plan, index, dayTypeId, { seed } = {}) {
   if (!plan.days[index] || plan.days[index].dayType === dayTypeId || !dayTypeOf(ctx.config, dayTypeId)) return plan;
   const next = clonePlan(plan);
   next.days[index].dayType = dayTypeId;
+  next.days[index].adjust = 1;
   next.days[index].seed = seed === undefined ? mixSeed(next.days[index].seed, 2) : uint(seed);
   return redrawDay(ctx, next, index);
+}
+
+/**
+ * Nouvelle semaine générée à la place de `previous` : garde l'ajustement de la semaine et celui des jours dont le type n'a pas
+ * changé (les repas retirés ne sont jamais repris). Sans `previous`, `next` est rendu tel quel.
+ */
+export function carryAdjust(next, previous) {
+  if (!previous) return next;
+  const out = clonePlan(next);
+  out.adjust = previous.adjust ?? 1;
+  out.days.forEach((d, i) => { if (previous.days[i]?.dayType === d.dayType) d.adjust = previous.days[i].adjust ?? 1; });
+  return out;
+}
+
+/** Retire le repas n° `mealIndex` d'un jour : il passe dans `removed` (il compte encore pour le facteur et le budget du jour). */
+export function removeMealAt(plan, dayIndex, mealIndex) {
+  if (!plan.days[dayIndex]?.meals[mealIndex]) return plan;
+  const next = clonePlan(plan);
+  const day = next.days[dayIndex];
+  day.removed.push(day.meals.splice(mealIndex, 1)[0]);
+  return next;
+}
+
+/** Rétablit le repas retiré n° `removedIndex` d'un jour, à sa place dans l'ordre des créneaux du type de journée. */
+export function restoreMealAt(ctx, plan, dayIndex, removedIndex) {
+  if (!plan.days[dayIndex]?.removed?.[removedIndex]) return plan;
+  const next = clonePlan(plan);
+  const day = next.days[dayIndex];
+  const [entry] = day.removed.splice(removedIndex, 1);
+  const dt = dayTypeOf(ctx.config, day.dayType);
+  const order = dt ? slotsFor(ctx.config, dt) : [];
+  const rank = (slot) => { const i = order.indexOf(slot); return i < 0 ? order.length : i; };
+  const at = day.meals.findIndex(([slot]) => rank(slot) > rank(entry[0]));
+  day.meals.splice(at < 0 ? day.meals.length : at, 0, entry);
+  return next;
+}
+
+/**
+ * Ajustement du jour qui ramène ses apports sur la cible de maintien `budget` (utile après un retrait ou un curseur) : le facteur
+ * calculé `base` est celui d'avant le retrait, l'ajustement du jour compense donc les repas retirés et l'ajustement de la semaine.
+ * Borné à la plage du jour.
+ * Sans budget (pas de profil), jour fixe ou jour vide : l'ajustement actuel est rendu.
+ */
+export function realignedDayAdjust(ctx, plan, dayIndex) {
+  const d = viewPlan(ctx, plan).days[dayIndex];
+  if (!d || d.fixed || d.budget === null || !(d.totals.kcal > 0)) return plan.days[dayIndex]?.adjust ?? 1;
+  return clampAdjust(ctx.config, 'day', d.budget / (d.totals.kcal * d.base * (plan.adjust ?? 1)));
 }
 
 /** Remplace un repas du planning (variante issue d'une substitution, par exemple) en gardant son créneau. */
@@ -369,29 +443,37 @@ export function viewPlan(ctx, plan) {
   const p = config.planner;
   const idx = mealIndex(ctx);
   const budgets = planBudgets(ctx, plan);
+  const planAdjust = plan.adjust ?? 1;
+  const macros = (list) => sum(list.filter((it) => it.meal && !it.meal.incomplete).map((it) => it.meal.totals));
   const days = plan.days.map((d, i) => {
     const dt = dayTypeOf(config, d.dayType);
     const fixed = isFixedType(config, d.dayType);
     const items = d.meals.map(([slot, id]) => ({ slot, id, meal: idx.get(id) ?? null }));
-    const totals = sum(items.filter((it) => it.meal && !it.meal.incomplete).map((it) => it.meal.totals));
+    const removedItems = (d.removed ?? []).map(([slot, id]) => ({ slot, id, meal: idx.get(id) ?? null }));
+    const totals = macros(items); // apports : repas présents seulement
+    const basis = add(totals, macros(removedItems)); // base du facteur : repas retirés encore existants compris
     const budget = budgets ? budgets[i] : null;
-    const factor = fixed || budget === null ? 1 : fitFactor(totals.kcal, budget, p.step);
+    const base = fixed || budget === null ? 1 : fitFactor(basis.kcal, budget, p.step);
+    const dayAdjust = d.adjust ?? 1;
+    const mult = fixed ? 1 : planAdjust * dayAdjust;
+    // Même arrondi (0,01) et mêmes bornes que « Ma journée » (day.js) : « Ajouter à Ma journée » retrouve exactement ce facteur.
+    const factor = fixed ? 1 : clampFactor(base * mult);
     const adjusted = scale(totals, factor);
     return {
-      index: i, label: d.label, dayType: dt, fixed, items, totals, factor, adjusted, budget,
-      target: ctx.targets?.[d.dayType] ?? null, delta: budget === null ? null : adjusted.kcal - budget,
+      index: i, label: d.label, dayType: dt, fixed, items, removedItems, totals, basis, base, adjust: dayAdjust, mult, factor, adjusted, budget,
+      target: ctx.targets?.[d.dayType] ?? null, delta: budget === null ? null : adjusted.kcal - budget, // toujours par rapport à la cible de maintien
     };
   });
   const total = sum(days.map((d) => d.adjusted));
   const expenditure = ctx.targets ? days.reduce((s, d) => s + (d.target?.expenditure ?? 0), 0) : null;
   const balance = expenditure === null ? null : total.kcal - expenditure;
   const week = {
-    total, average: total.kcal / (days.length || 1), expenditure, balance,
+    total, average: total.kcal / (days.length || 1), expenditure, balance, adjust: planAdjust,
     legumes: { count: legumeCount(ctx, days), min: p.rules.minLegumeMeals },
     budgetTotal: budgets ? budgets.reduce((a, b) => a + b, 0) : null,
     status: balance === null ? null : Math.abs(balance) <= p.balanceTolerance * expenditure ? 'maintien' : balance > 0 ? 'surplus' : 'déficit',
   };
-  return { seed: plan.seed, days, week, warnings: auditPlan(ctx, days, week), shopping: shoppingList(ctx, days) };
+  return { days, week, warnings: auditPlan(ctx, days, week), shopping: shoppingList(ctx, days) };
 }
 
 /** Nombre de repas à légumineuses de la semaine (jours lus par `viewPlan`). */
@@ -409,7 +491,7 @@ export function auditPlan(ctx, days, week = null) {
   for (const d of days) {
     const where = d.label;
     const accepted = contextsFor(config, d.dayType);
-    const have = new Set(d.items.map((it) => it.slot));
+    const have = new Set([...d.items, ...d.removedItems].map((it) => it.slot)); // un créneau retiré volontairement n'est pas « vide »
     for (const slot of slotsFor(config, d.dayType)) if (!have.has(slot)) warn(where, 'empty-slot', `Aucun repas disponible pour le créneau « ${slot} ».`);
     for (const it of d.items) {
       if (!it.meal) { warn(where, 'missing-meal', `Un repas du planning n'existe plus (« ${it.id} ») : regénère ce jour.`); continue; }
@@ -420,7 +502,10 @@ export function auditPlan(ctx, days, week = null) {
       if (!it.meal.contexts.some((c) => accepted.includes(c))) warn(where, 'context', `« ${it.meal.name} » ne correspond pas au contexte « ${d.dayType.label} ».`);
       if (hasMilkCocoa(it.meal, config) && !milkCocoaAllowed(config, d.dayType)) warn(where, 'milk-cocoa', `« ${it.meal.name} » : lait et cacao sucré sont réservés aux jours de sortie moyenne ou longue.`);
     }
-    if (!d.fixed && d.budget !== null && Math.abs(d.delta) > p.gapWarning * d.budget) {
+    // L'écart se compare à la cible de maintien ; pas d'avertissement quand l'écart est voulu (repas retiré, curseur ≠ ×1),
+    // sauf si le facteur est bloqué à une borne de portion : l'écart est alors subi.
+    const voluntary = d.removedItems.length > 0 || (d.mult !== 1 && d.factor > FACTOR_MIN && d.factor < FACTOR_MAX);
+    if (!d.fixed && d.budget !== null && !voluntary && Math.abs(d.delta) > p.gapWarning * d.budget) {
       warn(where, 'kcal-gap', `Budget de ${fmtKcal(d.budget)} kcal hors de portée avec ces repas (portions limitées à ×${fmtNum(d.factor, 2)}) : écart de ${fmtKcal(d.delta)} kcal.`);
     }
   }
@@ -493,16 +578,20 @@ const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 /**
  * Relit un planning enregistré (stockage du navigateur ou sauvegarde JSON) : types, listes et graines revalidés ; null si
  * la structure est inutilisable. Les repas sont gardés tels quels : un repas supprimé depuis est signalé par `viewPlan`.
- * @param {any} raw @param {{dayTypeIds?: string[]}} [opts]
+ * Un planning enregistré sans `adjust` ni `removed` (ancienne forme) se relit avec `adjust: 1` et `removed: []`.
+ * `adjust` (config.planner.adjust) borne les ajustements aux plages de la config ; sans lui (lecture d'une sauvegarde avant le
+ * chargement de la config), seuls les nombres strictement positifs sont gardés et la plage est revalidée au chargement.
+ * @param {any} raw @param {{dayTypeIds?: string[], adjust?: object}} [opts]
  */
-export function sanitizePlan(raw, { dayTypeIds } = {}) {
+export function sanitizePlan(raw, { dayTypeIds, adjust } = {}) {
   if (!isObj(raw) || !Array.isArray(raw.days) || !raw.days.length || raw.days.length > 14) return null;
+  const adj = (v, scope) => (Number.isFinite(v) && v > 0 ? (adjust ? clampAdjustWith(adjust, scope, v) : v) : 1);
+  const mealPairs = (list) => (Array.isArray(list) ? list : []).filter((m) => Array.isArray(m) && typeof m[0] === 'string' && typeof m[1] === 'string').map((m) => [m[0], m[1]]);
   const days = [];
   for (const d of raw.days) {
     if (!isObj(d) || typeof d.label !== 'string' || !d.label.trim() || typeof d.dayType !== 'string' || !d.dayType) return null;
     if (dayTypeIds && !dayTypeIds.includes(d.dayType)) return null;
-    const meals = (Array.isArray(d.meals) ? d.meals : []).filter((m) => Array.isArray(m) && typeof m[0] === 'string' && typeof m[1] === 'string').map((m) => [m[0], m[1]]);
-    days.push({ label: d.label.slice(0, 40), dayType: d.dayType, seed: uint(d.seed), meals });
+    days.push({ label: d.label.slice(0, 40), dayType: d.dayType, seed: uint(d.seed), adjust: adj(d.adjust, 'day'), meals: mealPairs(d.meals), removed: mealPairs(d.removed) });
   }
-  return { v: PLAN_VERSION, seed: uint(raw.seed), days };
+  return { v: PLAN_VERSION, seed: uint(raw.seed), adjust: adj(raw.adjust, 'week'), days };
 }

@@ -109,6 +109,7 @@
     "attempts": 60,
     "floor": 0.9,
     "step": 0.01,
+    "adjust": { "week": { "min": 0.75, "max": 1.25 }, "day": { "min": 0.5, "max": 2 }, "step": 0.01 },
     "gapWarning": 0.08,
     "balanceTolerance": 0.02,
     "score": { "protein": 0.5, "fiber": 0.25 }

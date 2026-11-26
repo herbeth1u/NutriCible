@@ -47,6 +47,13 @@ test("affichage à l'unité : plus de roundKcal ni de roundG dans src/, un seul 
   assert.ok((await read('CLAUDE.md')).includes('Un seul formateur pour les kcal et les macros'));
 });
 
+test('planificateur : plus aucune graine affichée dans l\'interface (elle reste interne au tirage)', async () => {
+  for (const f of (await walk('src/components')).filter((x) => x.endsWith('.js'))) {
+    assert.ok(!/graine/i.test(await read(f)), `${f} : mention de la graine dans l'interface`);
+  }
+  assert.ok(!/graine/i.test(await read('README.md').then((t) => t.slice(t.indexOf('### Planificateur de semaine'), t.indexOf('### Fiche repas et substitution')))), 'README : le planificateur n\'affiche plus la graine');
+});
+
 test('documentation : README et CLAUDE.md rappellent la règle de confidentialité et les invariants', async () => {
   const readme = await read('README.md');
   const claude = await read('CLAUDE.md');

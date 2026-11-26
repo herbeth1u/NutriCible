@@ -51,7 +51,9 @@ L'onglet **Planificateur** tire au sort une semaine de repas du recueil, selon l
 
 - **Budget par jour** : chaque jour a sa dépense (ton profil et les coefficients des types de journée). Le jour du cheat meal est fixe (le repas d'environ 3 000 kcal) ; le reste du budget de la semaine est réparti sur les autres jours, jamais en dessous de 90 % de leur dépense. Un **facteur de portion** global (au centième, par pas de 1 %) ramène chaque jour à son budget ; l'écart à la cible est affiché. Sans profil, les repas sont tirés près d'une journée type, avec des portions ×1 et sans budget.
 - **Créneaux et règles** : petit-déjeuner, déjeuner, une collation, effort, récupération, dîner selon le type de journée ; les candidats sont filtrés par contexte. Règles strictes : légumineuses au moins 4 fois dans la semaine (le tirage les place sur 4 jours différents), saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue, aucun repas répété dans la semaine. Si une règle est impossible à tenir, un avertissement l'indique.
-- **Tirage mémorisé** : « Générer une nouvelle semaine » (avec un « Annuler » d'un niveau), « Regénérer ce jour » (les autres jours ne bougent pas), menu du type de journée (les budgets des autres jours se rééquilibrent), « Ajouter à Ma journée » (remplace le contenu de Ma journée par ce jour, avec son facteur). La graine du tirage est affichée : la même graine redonne la même semaine.
+- **Tirage mémorisé** : « Générer une nouvelle semaine » (avec un « Annuler » d'un niveau), « Regénérer ce jour » (les autres jours ne bougent pas), menu du type de journée (les budgets des autres jours se rééquilibrent), « Ajouter à Ma journée » (remplace le contenu de Ma journée par ce jour, avec son facteur). La semaine générée, retouches comprises, est enregistrée dans le navigateur et dans la sauvegarde JSON : elle reste identique après un rechargement ou une restauration.
+- **Ajustements de portions** : un curseur « Ajustement de la semaine » (×0,75 à ×1,25) et un curseur « Ajustement du jour » (×0,50 à ×2,00), par pas de 0,01, multiplient le facteur calculé par le planificateur ; ils se cumulent, et le jour du cheat meal n'est pas concerné. « Réaligner sur la cible » règle l'ajustement du jour pour rejoindre sa cible (utile après un retrait). Les ajustements sont conservés par « Générer une nouvelle semaine » et « Regénérer ce jour », et remis à ×1 par un changement de type de journée et par « Semaine type ».
+- **Retirer un repas** : le ✕ d'une ligne retire le repas sans recalculer les portions des autres : le total du jour baisse, l'écart à la cible devient négatif (sans avertissement) et le solde de la semaine en tient compte. Le repas retiré n'entre plus dans le bilan, la liste de courses ni « Ma journée » ; il reste affiché sous le tableau du jour avec « Rétablir » (« Annuler » fonctionne aussi).
 - **Bilan** : macros, kcal et solde hebdomadaire (apports moins dépense). **Liste de courses** : aliments dédoublonnés, quantités cumulées (portions comprises), regroupés par type, avec « Copier la liste ».
 - Le nom d'un repas ouvre sa fiche ; ⇄ y remplace un aliment, et la variante prend la place du repas dans le planning.
 
@@ -106,7 +108,7 @@ npm run validate   # validation des données (références, listes, absence de d
 npm test           # tests (lanceur intégré de Node ≥ 20), aucune dépendance
 ```
 
-Les tests couvrent notamment : macros et arrondis, conversion cru/cuit, aliments composés et surcharge, densité par catégorie, tags automatiques (dont « Saisonnier »), métabolisme de base et cibles (profils fictifs), export CSV, sauvegarde et restauration (formats 1 à 3), planificateur de semaine (règles, graine, budgets, liste de courses), règles alimentaires sur les données.
+Les tests couvrent notamment : macros et arrondis, conversion cru/cuit, aliments composés et surcharge, densité par catégorie, tags automatiques (dont « Saisonnier »), métabolisme de base et cibles (profils fictifs), export CSV, sauvegarde et restauration (formats 1 à 3), planificateur de semaine (règles, graine, budgets, ajustements, retrait de repas, liste de courses), règles alimentaires sur les données.
 
 ### Vue vendorisée
 
@@ -132,7 +134,7 @@ src/vue.js            point d'entrée unique de Vue
 src/store.js          état, valeurs dérivées, persistance préfixée
 src/calc.js           fonctions pures : une seule fonction de calcul pour tous les repas
 src/substitute.js     substitution d'aliments (aliments proches, quantité équivalente, variante identique)
-src/planner.js        planificateur de semaine (tirage à graine, budgets, règles, liste de courses)
+src/planner.js        planificateur de semaine (tirage à graine, budgets, règles, ajustements, retrait de repas, liste de courses)
 src/notion-export.js  génération du CSV
 src/backup.js         sauvegarde, restauration, migrations de format
 src/components/       un fichier par onglet et par boîte de dialogue

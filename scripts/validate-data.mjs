@@ -21,6 +21,7 @@ const PERSONAL_KEYS = [
 ].map((k) => k.toLowerCase());
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const dup = (list) => list.filter((x, i) => list.indexOf(x) !== i);
 
 function scanKeys(value, path, out) {
@@ -211,6 +212,16 @@ export function validateData({ foods, internal, meals, days, config }) {
     if (!Number.isInteger(pl.attempts) || pl.attempts < 1) err('config.planner.attempts : entier ≥ 1 attendu');
     if (!isNum(pl.floor) || pl.floor <= 0 || pl.floor > 1) err('config.planner.floor : entre 0 (exclu) et 1 attendu');
     if (!isNum(pl.step) || pl.step <= 0 || pl.step > 0.5) err('config.planner.step : entre 0 (exclu) et 0,5 attendu');
+    // ajustements de portions (curseurs du planificateur) : plages autour de ×1, pas distinct de `step` (facteur calculé)
+    const adj = pl.adjust;
+    if (!isObj(adj)) err('config.planner.adjust : bloc { week, day, step } manquant');
+    else {
+      for (const k of ['week', 'day']) {
+        const r = adj[k];
+        if (!isObj(r) || !isNum(r.min) || !isNum(r.max) || !(r.min > 0 && r.min <= 1 && r.max >= 1)) err(`config.planner.adjust.${k} : { min, max } attendu, avec 0 < min ≤ 1 ≤ max`);
+      }
+      if (!isNum(adj.step) || adj.step <= 0 || adj.step > 0.5) err('config.planner.adjust.step : entre 0 (exclu) et 0,5 attendu');
+    }
     for (const k of ['gapWarning', 'balanceTolerance']) if (!isNum(pl[k]) || pl[k] <= 0) err(`config.planner.${k} : nombre positif attendu`);
     for (const k of ['protein', 'fiber']) if (!isNum(pl.score?.[k]) || pl.score[k] < 0) err(`config.planner.score.${k} : nombre positif ou nul attendu`);
   }

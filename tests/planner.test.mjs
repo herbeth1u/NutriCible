@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { validateData } from '../scripts/validate-data.mjs';
 import * as C from '../src/calc.js';
 import * as P from '../src/planner.js';
+import { clampFactor } from '../src/day.js';
 import { effectiveWeek } from '../src/week.js';
 import { FICTIVE, FICTIVE_F, near, plannerCtx, world } from './helpers.mjs';
 
@@ -566,7 +567,7 @@ test('sanitizePlan : relecture sûre d\'un planning enregistré', async () => {
   assert.equal(P.sanitizePlan({ days: [{ label: 'Lundi', dayType: 'inconnu', meals: [] }] }, { dayTypeIds: ids7 }), null, 'type de journée inconnu');
   assert.equal(P.sanitizePlan({ days: [{ label: '', dayType: 'repos' }] }), null);
   const dirty = P.sanitizePlan({ seed: -3, pirate: 1, days: [{ label: 'Lundi', dayType: 'courte', seed: 'x', meals: [['Dîner', 'a'], ['Dîner'], [3, 'b'], 'c', null, ['Déjeuner', 'd', 'extra']] }] }, { dayTypeIds: ids7 });
-  assert.deepEqual(dirty, { v: 1, seed: 0, days: [{ label: 'Lundi', dayType: 'courte', seed: 0, meals: [['Dîner', 'a'], ['Déjeuner', 'd']] }] });
+  assert.deepEqual(dirty, { v: 1, seed: 0, adjust: 1, days: [{ label: 'Lundi', dayType: 'courte', seed: 0, adjust: 1, meals: [['Dîner', 'a'], ['Déjeuner', 'd']], removed: [] }] });
 });
 
 test('semaine type et référence : types de journée de days.json, kcal de la journée type', async () => {
@@ -609,6 +610,328 @@ test('semaine type personnalisée : le planificateur l\'utilise pour une nouvell
   }
 });
 
+// ------------------------------------------------------------------ lot D : ajustements de portions et retrait de repas
+const r2 = (n) => Math.round(n * 100) / 100;
+/** Le même planning avec un ajustement de semaine et des ajustements de jours (`days` : { indice: valeur }). */
+const withAdjust = (plan, week, days = {}) => ({ ...plan, adjust: week, days: plan.days.map((d, i) => ({ ...d, adjust: days[i] ?? d.adjust })) });
+const allDays = (plan, v) => Object.fromEntries(plan.days.map((_, i) => [i, v]));
+const shopMass = (view) => view.shopping.groups.flatMap((g) => g.items).reduce((s, e) => s + e.qty, 0);
+
+test('modèle du planning : generateWeek et sanitizePlan produisent la même forme (adjust ×1, removed vide, graines internes)', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  const plan = P.generateWeek(ctx, { seed: 4 });
+  assert.equal(plan.v, 1);
+  assert.equal(P.PLAN_VERSION, 1);
+  assert.equal(plan.adjust, 1);
+  for (const d of plan.days) { assert.equal(d.adjust, 1); assert.deepEqual(d.removed, []); assert.ok(Number.isInteger(d.seed)); }
+  const opts = { dayTypeIds: w.config.dayTypes.map((t) => t.id), adjust: w.config.planner.adjust };
+  assert.deepEqual(P.sanitizePlan(JSON.parse(JSON.stringify(plan)), opts), plan);
+  const view = P.viewPlan(ctx, plan);
+  assert.equal(view.week.adjust, 1);
+  assert.ok(!('seed' in view), 'la graine n\'est plus exposée à l\'interface');
+  for (const d of view.days) { assert.equal(d.mult, 1); assert.equal(d.base, d.factor); assert.ok(!('goal' in d)); assert.deepEqual(d.removedItems, []); }
+});
+
+test('sanitizePlan : anciennes formes, valeurs hors plage (bornées par config.planner.adjust), removed invalide', async () => {
+  const w = await world();
+  const opts = { dayTypeIds: w.config.dayTypes.map((t) => t.id), adjust: w.config.planner.adjust };
+  const old = { v: 1, seed: 5, days: [{ label: 'Lundi', dayType: 'courte', seed: 7, meals: [['Dîner', 'a']] }] };
+  assert.deepEqual(P.sanitizePlan(old, opts), { v: 1, seed: 5, adjust: 1, days: [{ label: 'Lundi', dayType: 'courte', seed: 7, adjust: 1, meals: [['Dîner', 'a']], removed: [] }] });
+  const day = (o) => ({ label: 'Lundi', dayType: 'courte', seed: 1, meals: [], ...o });
+  const wild = P.sanitizePlan({ adjust: 9, days: [day({ adjust: 0.1 }), day({ adjust: 9 }), day({ adjust: 'x' }), day({ adjust: -2 }), day({ adjust: NaN }), day({ adjust: 1.234 })] }, opts);
+  assert.equal(wild.adjust, w.config.planner.adjust.week.max);
+  assert.deepEqual(wild.days.map((d) => d.adjust), [w.config.planner.adjust.day.min, w.config.planner.adjust.day.max, 1, 1, 1, 1.23]);
+  assert.equal(P.sanitizePlan({ adjust: 0.1, days: [day()] }, opts).adjust, w.config.planner.adjust.week.min);
+  assert.equal(P.sanitizePlan({ adjust: 0.9, days: [day()] }, opts).adjust, 0.9);
+  assert.equal(P.sanitizePlan({ adjust: 'non', days: [day()] }, opts).adjust, 1);
+  // sans la config (lecture d'une sauvegarde avant le chargement) : seuls les nombres positifs sont gardés, la plage est revalidée ensuite
+  assert.equal(P.sanitizePlan({ adjust: 9, days: [day({ adjust: -1 })] }).adjust, 9);
+  assert.equal(P.sanitizePlan({ adjust: 9, days: [day({ adjust: -1 })] }).days[0].adjust, 1);
+  const bad = P.sanitizePlan({ days: [day({ removed: [['Dîner', 'a'], ['Dîner'], [1, 'b'], 'c', null, ['Déjeuner', 'd', 'x']] }), day({ removed: 'non' }), day({})] }, opts);
+  assert.deepEqual(bad.days.map((d) => d.removed), [[['Dîner', 'a'], ['Déjeuner', 'd']], [], []]);
+});
+
+test('persistance : un planning ajusté avec des repas retirés est identique après relecture (stockage du navigateur)', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  const opts = { dayTypeIds: w.config.dayTypes.map((t) => t.id), adjust: w.config.planner.adjust };
+  let plan = withAdjust(P.generateWeek(ctx, { seed: 8 }), 0.93, { 0: 1.27, 3: 0.64, 5: 1.5 });
+  plan = P.removeMealAt(P.removeMealAt(P.removeMealAt(plan, 0, 1), 3, 0), 5, 2);
+  assert.equal(plan.days[0].removed.length, 1);
+  const reread = P.sanitizePlan(JSON.parse(JSON.stringify(plan)), opts);
+  assert.deepEqual(reread, plan);
+  assert.deepEqual(P.viewPlan(ctx, reread), P.viewPlan(ctx, plan), 'même lecture : semaine, ajustements et repas retirés identiques');
+});
+
+test('retrait : facteur et budgets inchangés, apports baissés du repas × facteur, absent du bilan et des courses, aucun écart signalé, rétablir revient à l\'état initial', async () => {
+  const w = await world();
+  for (const profile of [FICTIVE, FICTIVE_F, null]) {
+    const ctx = plannerCtx(w, profile);
+    for (const seed of SEEDS.slice(0, 8)) {
+      const plan = P.generateWeek(ctx, { seed });
+      const snap = JSON.stringify(plan);
+      const before = P.viewPlan(ctx, plan);
+      for (const i of [0, 2, 3, 5]) { // 2 : jour du cheat meal
+        const k = Math.min(1, plan.days[i].meals.length - 1);
+        const [slot, id] = plan.days[i].meals[k];
+        const kcal = ctx.mealIdx.get(id).totals.kcal;
+        const next = P.removeMealAt(plan, i, k);
+        const after = P.viewPlan(ctx, next);
+        const where = `${profile ? 'profil' : 'sans profil'}, graine ${seed}, jour ${i}`;
+        const b = before.days[i];
+        const a = after.days[i];
+        assert.equal(JSON.stringify(plan), snap, `${where} : planning d'origine inchangé`);
+        assert.deepEqual(next.days[i].removed, [[slot, id]], where);
+        assert.equal(next.days[i].meals.length, plan.days[i].meals.length - 1, where);
+        // le facteur est celui d'avant (il se calcule sur `basis`) ; le total du jour baisse du repas retiré
+        assert.equal(a.factor, b.factor, `${where} : facteur`);
+        near(assert, a.basis.kcal, b.totals.kcal, 1e-9);
+        near(assert, a.totals.kcal, b.totals.kcal - kcal, 1e-6);
+        near(assert, a.adjusted.kcal, b.adjusted.kcal - kcal * b.factor, 1e-6);
+        // les autres jours et leurs budgets ne bougent pas
+        after.days.forEach((d, j) => { near(assert, d.budget ?? 0, before.days[j].budget ?? 0, 1e-6); if (j !== i) assert.deepEqual(d.items, before.days[j].items, `${where} : jour ${j}`); });
+        // absent du jour, du bilan, de la liste de courses et de « Ma journée » (items chargés dans « Ma journée » = d.items)
+        assert.ok(!a.items.some((it) => it.slot === slot && it.id === id), where);
+        near(assert, after.week.total.kcal, before.week.total.kcal - kcal * b.factor, 1e-6);
+        assert.ok(shopMass(after) < shopMass(before) || a.fixed, `${where} : liste de courses`);
+        // aucun avertissement d'écart ni de créneau vide pour ce jour (le créneau retiré n'est pas « vide »)
+        assert.deepEqual(after.warnings.filter((x) => x.day === a.label && ['kcal-gap', 'empty-slot'].includes(x.code)), [], where);
+        if (!a.fixed) {
+          const bare = P.viewPlan(ctx, { ...next, days: next.days.map((d, j) => (j === i ? { ...d, removed: [] } : d)) });
+          assert.ok(bare.warnings.some((x) => x.day === a.label && x.code === 'empty-slot'), `${where} : sans « removed », le créneau serait vide`);
+        }
+        // rétablir : retour à l'état initial
+        assert.deepEqual(P.restoreMealAt(ctx, next, i, 0), plan, `${where} : rétablir`);
+        assert.deepEqual(P.viewPlan(ctx, P.restoreMealAt(ctx, next, i, 0)), before, `${where} : lecture après rétablissement`);
+      }
+    }
+  }
+});
+
+test('retrait : plusieurs repas, dernier repas d\'un jour, rétablissement dans l\'ordre des créneaux, indices inconnus', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  const plan = P.generateWeek(ctx, { seed: 6 });
+  const n = plan.days[3].meals.length;
+  let cur = plan;
+  for (let k = 0; k < n; k += 1) cur = P.removeMealAt(cur, 3, 0);
+  const view = P.viewPlan(ctx, cur);
+  assert.deepEqual(cur.days[3].meals, []);
+  assert.equal(cur.days[3].removed.length, n);
+  assert.equal(view.days[3].items.length, 0);
+  assert.equal(view.days[3].totals.kcal, 0);
+  assert.equal(view.days[3].adjusted.kcal, 0);
+  assert.equal(view.days[3].factor, P.viewPlan(ctx, plan).days[3].factor, 'dernier repas retiré : facteur inchangé');
+  assert.deepEqual(view.warnings.filter((x) => x.day === view.days[3].label && ['kcal-gap', 'empty-slot'].includes(x.code)), []);
+  // rétablis dans le désordre (le dernier retiré d'abord) : l'ordre des créneaux du type de journée est retrouvé
+  let back = cur;
+  for (let k = 0; k < n; k += 1) back = P.restoreMealAt(ctx, back, 3, back.days[3].removed.length - 1);
+  assert.deepEqual(back, plan);
+  // repas du milieu retiré puis rétabli : il retrouve sa place
+  const mid = P.removeMealAt(P.removeMealAt(plan, 3, 1), 3, 1);
+  assert.deepEqual(P.restoreMealAt(ctx, P.restoreMealAt(ctx, mid, 3, 1), 3, 0), plan);
+  assert.equal(P.removeMealAt(plan, 3, 99), plan);
+  assert.equal(P.removeMealAt(plan, 99, 0), plan);
+  assert.equal(P.restoreMealAt(ctx, plan, 3, 0), plan);
+  assert.equal(P.restoreMealAt(ctx, plan, 99, 0), plan);
+});
+
+test('retrait : le repas du cheat meal retiré ne déplace pas les budgets des autres jours ; repas supprimé depuis (introuvable) ignoré dans la base', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  const plan = P.generateWeek(ctx, { seed: 14 });
+  const cheat = plan.days.findIndex((d) => d.dayType === 'cheat');
+  const before = P.viewPlan(ctx, plan);
+  const after = P.viewPlan(ctx, P.removeMealAt(plan, cheat, 0));
+  after.days.forEach((d, j) => near(assert, d.budget, before.days[j].budget, 1e-6));
+  near(assert, after.week.budgetTotal, before.week.budgetTotal, 1e-6);
+  assert.equal(after.days[cheat].factor, 1);
+  // un repas retiré qui n'existe plus : ignoré dans `basis`, affiché comme introuvable, sans exception
+  const i = 0;
+  const [, id] = plan.days[i].meals[1];
+  const removed = P.removeMealAt(plan, i, 1);
+  const gone = { ...ctx, mealIdx: new Map([...ctx.mealIdx].filter(([k]) => k !== id)), meals: ctx.meals.filter((m) => m.id !== id) };
+  const v = P.viewPlan(gone, removed);
+  assert.equal(v.days[i].removedItems[0].meal, null);
+  near(assert, v.days[i].basis.kcal, v.days[i].totals.kcal, 1e-9);
+});
+
+test('curseurs : factor = r2(base × semaine × jour) borné à [0,5 ; 2], jour fixe inchangé, d.factor invariant par clampFactor, écart toujours par rapport au budget', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w, FICTIVE);
+  for (const seed of SEEDS.slice(0, 10)) {
+    const plan = P.generateWeek(ctx, { seed });
+    const ref = P.viewPlan(ctx, plan);
+    for (const [wk, dk] of [[0.9, 1.1], [1.25, 2], [0.75, 0.5], [1, 1.37], [1.1, 1]]) {
+      const view = P.viewPlan(ctx, withAdjust(plan, wk, allDays(plan, dk)));
+      const where = `graine ${seed}, semaine ×${wk}, jour ×${dk}`;
+      assert.equal(view.week.adjust, wk);
+      for (const d of view.days) {
+        const r = ref.days[d.index];
+        assert.equal(clampFactor(d.factor), d.factor, `${where} : ${d.label} invariant par clampFactor`);
+        assert.ok(d.factor >= 0.5 && d.factor <= 2, where);
+        if (d.fixed) {
+          assert.equal(d.factor, 1, where);
+          assert.equal(d.mult, 1, where);
+          near(assert, d.adjusted.kcal, r.adjusted.kcal, 1e-9);
+          near(assert, d.delta, r.delta, 1e-9);
+          continue;
+        }
+        near(assert, d.base, r.base, 1e-12);
+        near(assert, d.mult, wk * dk, 1e-12);
+        near(assert, d.factor, Math.min(2, Math.max(0.5, r2(d.base * wk * dk))), 1e-12);
+        assert.ok(!('goal' in d), 'plus de cible ajustée');
+        near(assert, d.delta, d.adjusted.kcal - d.budget, 1e-9);
+        near(assert, d.adjusted.kcal, d.totals.kcal * d.factor, 1e-6);
+      }
+    }
+  }
+});
+
+test('curseurs : sans profil, le facteur ne vient que des ajustements ; sans budget ni écart', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w, null);
+  const plan = P.generateWeek(ctx, { seed: 3 });
+  const view = P.viewPlan(ctx, withAdjust(plan, 0.9, allDays(plan, 1.1)));
+  for (const d of view.days) {
+    assert.equal(d.base, 1);
+    assert.equal(d.delta, null);
+    assert.equal(d.factor, d.fixed ? 1 : r2(0.9 * 1.1));
+  }
+  assert.equal(P.realignedDayAdjust(ctx, withAdjust(plan, 0.9, { 0: 1.3 }), 0), 1.3, 'sans budget : l\'ajustement actuel est rendu');
+});
+
+test('curseur de la semaine : le solde de la semaine est proportionnel au curseur, le jour du cheat meal est exclu', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w, FICTIVE);
+  let checked = 0;
+  for (const seed of SEEDS.slice(0, 12)) {
+    const plan = P.generateWeek(ctx, { seed });
+    const ref = P.viewPlan(ctx, plan);
+    const open = ref.days.filter((d) => !d.fixed);
+    const fixedKcal = ref.days.filter((d) => d.fixed).reduce((s, d) => s + d.adjusted.kcal, 0);
+    const openKcal = open.reduce((s, d) => s + d.adjusted.kcal, 0);
+    for (const wk of [0.8, 0.9, 1.1, 1.2]) {
+      const view = P.viewPlan(ctx, withAdjust(plan, wk));
+      if (view.days.some((d) => !d.fixed && (d.factor === 0.5 || d.factor === 2))) continue; // facteur borné : plus proportionnel
+      const tol = 0.005 * open.reduce((s, d) => s + d.totals.kcal, 0) + 1; // facteur arrondi au centième
+      near(assert, view.week.total.kcal, fixedKcal + wk * openKcal, tol);
+      near(assert, view.week.balance, ref.week.balance + (wk - 1) * openKcal, tol);
+      for (const d of view.days.filter((x) => x.fixed)) near(assert, d.adjusted.kcal, ref.days[d.index].adjusted.kcal, 1e-9);
+      checked += 1;
+    }
+  }
+  assert.ok(checked > 20, `${checked} cas vérifiés`);
+});
+
+test('curseurs : kcal-gap se compare au budget et n\'est pas émis quand l\'écart est voulu (curseur ≠ ×1)', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w, FICTIVE);
+  let checked = 0;
+  for (const seed of SEEDS.slice(0, 12)) {
+    const plan = P.generateWeek(ctx, { seed });
+    const view = P.viewPlan(ctx, withAdjust(plan, 1.2));
+    if (view.days.some((d) => !d.fixed && (d.factor === 0.5 || d.factor === 2))) continue;
+    for (const d of view.days.filter((x) => !x.fixed)) {
+      assert.ok(Math.abs(d.delta) > w.config.planner.gapWarning * d.budget, `${d.label} : l'écart au budget dépasse le seuil`);
+    }
+    assert.ok(!codes(view).includes('kcal-gap'), `graine ${seed}`);
+    checked += 1;
+  }
+  assert.ok(checked > 5);
+});
+
+test('curseurs : un ajustement hors d\'atteinte (facteur borné) reste signalé comme budget hors de portée', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w, FICTIVE);
+  const plan = P.generateWeek(ctx, { seed: 2 });
+  const view = P.viewPlan(ctx, withAdjust(plan, 1.25, allDays(plan, 2)));
+  for (const d of view.days.filter((x) => !x.fixed)) assert.ok(d.factor <= 2);
+  assert.ok(view.days.some((d) => !d.fixed && d.factor === 2));
+  assert.ok(codes(view).includes('kcal-gap'));
+});
+
+test('« Réaligner sur la cible » : après un retrait, l\'ajustement du jour ramène les apports sur la cible de maintien, quel que soit le curseur de la semaine', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w, FICTIVE);
+  let checked = 0;
+  for (const seed of SEEDS.slice(0, 10)) {
+    for (const wk of [1, 0.9]) {
+      const plan = withAdjust(P.generateWeek(ctx, { seed }), wk);
+      for (const i of [0, 1, 3, 4, 5]) {
+        const day = plan.days[i];
+        const k = day.meals.map(([, id]) => ctx.mealIdx.get(id).totals.kcal).reduce((m, v, j, a) => (v < a[m] ? j : m), 0); // le repas le plus léger
+        const removed = P.removeMealAt(plan, i, k);
+        const adj = P.realignedDayAdjust(ctx, removed, i);
+        assert.ok(adj >= w.config.planner.adjust.day.min && adj <= w.config.planner.adjust.day.max);
+        const d = P.viewPlan(ctx, withAdjust(removed, wk, { [i]: adj })).days[i];
+        if (d.factor === 0.5 || d.factor === 2 || adj === 2) continue; // borné : la cible n'est pas atteignable
+        near(assert, d.adjusted.kcal, d.budget, 0.011 * d.budget);
+        near(assert, d.delta, 0, 0.011 * d.budget);
+        checked += 1;
+      }
+    }
+  }
+  assert.ok(checked > 30, `${checked} cas vérifiés`);
+  // jour fixe : rien à réaligner
+  const plan = P.generateWeek(ctx, { seed: 1 });
+  assert.equal(P.realignedDayAdjust(ctx, plan, plan.days.findIndex((d) => d.dayType === 'cheat')), 1);
+});
+
+test('conservation des ajustements (P5) : « Regénérer ce jour », changement de type, nouvelle génération, « Semaine type »', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  const base = P.generateWeek(ctx, { seed: 31 });
+  const mine = P.removeMealAt(P.removeMealAt(withAdjust(base, 0.9, { 0: 1.2, 1: 0.8, 3: 1.4 }), 0, 1), 3, 0);
+  const snap = JSON.stringify(mine);
+  // « Regénérer ce jour » : ajustements gardés (semaine et jour), repas retirés du jour vidés, les autres jours intacts (retraits compris)
+  const reg = P.regenerateDay(ctx, mine, 0, { seed: 5 });
+  assert.equal(reg.adjust, 0.9);
+  assert.equal(reg.days[0].adjust, 1.2);
+  assert.deepEqual(reg.days[0].removed, []);
+  assert.deepEqual(reg.days.filter((_, j) => j !== 0), mine.days.filter((_, j) => j !== 0));
+  assert.equal(reg.days[3].removed.length, 1);
+  // changement de type : ajustement du jour remis à ×1 et retraits vidés ; celui de la semaine et des autres jours reste
+  const other = w.config.dayTypes.find((t) => t.id !== mine.days[3].dayType && !P.isFixedType(w.config, t.id)).id;
+  const typ = P.setDayType(ctx, mine, 3, other, { seed: 5 });
+  assert.equal(typ.days[3].dayType, other);
+  assert.equal(typ.days[3].adjust, 1);
+  assert.deepEqual(typ.days[3].removed, []);
+  assert.equal(typ.adjust, 0.9);
+  assert.equal(typ.days[0].adjust, 1.2);
+  assert.equal(typ.days[0].removed.length, 1);
+  assert.equal(P.setDayType(ctx, mine, 3, mine.days[3].dayType), mine, 'même type : rien ne change (ajustement et retraits gardés)');
+  // nouvelle génération : ajustement de la semaine et des jours dont le type n'a pas changé gardés, aucun repas retiré repris
+  const types = mine.days.map((d) => d.dayType);
+  const carried = P.carryAdjust(P.generateWeek(ctx, { seed: 99, dayTypes: types }), mine);
+  assert.equal(carried.adjust, 0.9);
+  assert.deepEqual(carried.days.map((d) => d.adjust), mine.days.map((d) => d.adjust));
+  assert.ok(carried.days.every((d) => d.removed.length === 0));
+  const changed = P.carryAdjust(P.generateWeek(ctx, { seed: 99, dayTypes: types.map((t, j) => (j === 1 ? other === t ? 'repos' : other : t)) }), mine);
+  assert.equal(changed.days[1].adjust, 1, 'type changé : ajustement du jour à ×1');
+  assert.equal(changed.days[0].adjust, 1.2);
+  assert.equal(changed.adjust, 0.9);
+  // « Semaine type » (reset) : la génération repart de ×1 partout et sans repas retiré
+  const reset = P.generateWeek(ctx, { seed: 99 });
+  assert.equal(reset.adjust, 1);
+  assert.ok(reset.days.every((d) => d.adjust === 1 && d.removed.length === 0));
+  assert.equal(P.carryAdjust(reset, null), reset);
+  assert.equal(JSON.stringify(mine), snap, 'aucun planning passé en paramètre n\'est modifié');
+});
+
+test('curseurs : le planning se relit identique après sanitizePlan quelles que soient les valeurs enregistrées', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  const opts = { dayTypeIds: w.config.dayTypes.map((t) => t.id), adjust: w.config.planner.adjust };
+  const plan = withAdjust(P.generateWeek(ctx, { seed: 10 }), 1.07, { 1: 0.55, 4: 1.99 });
+  const again = P.sanitizePlan(JSON.parse(JSON.stringify(plan)), opts);
+  assert.deepEqual(again, plan);
+  assert.deepEqual(P.clampAdjust(w.config, 'week', 3), 1.25);
+  assert.deepEqual(P.clampAdjust(w.config, 'day', 0), 1);
+  assert.deepEqual(P.clampAdjust(w.config, 'day', '1.234'), 1.23);
+});
+
 // ------------------------------------------------------------------ données
 test('config.planner : validée par validate-data (références, listes, nombres)', async () => {
   const w = await world();
@@ -628,6 +951,10 @@ test('config.planner : validée par validate-data (références, listes, nombres
   assert.match(bad((p) => { p.fixedDayTypes = ['x']; }), /type de journée « x » inconnu/);
   assert.match(bad((p) => { p.attempts = 0; }), /attempts/);
   assert.match(bad((p) => { p.floor = 1.5; }), /floor/);
+  assert.match(bad((p) => { delete p.adjust; }), /adjust : bloc/);
+  assert.match(bad((p) => { p.adjust.week.min = 1.5; }), /adjust\.week/);
+  assert.match(bad((p) => { p.adjust.day.max = 0.9; }), /adjust\.day/);
+  assert.match(bad((p) => { p.adjust.step = 0; }), /adjust\.step/);
   const noBlock = structuredClone(w.config);
   delete noBlock.planner;
   assert.match(validateData({ foods: w.foods, internal: { schemaVersion: 1, ingredients: w.internal }, meals: { schemaVersion: 1, meals: w.meals.map((m) => m.def) }, days: w.days, config: noBlock }).errors.join('\n'), /bloc « planner » manquant/);

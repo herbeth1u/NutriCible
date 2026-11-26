@@ -49,6 +49,9 @@ button.subitem:hover { background: var(--accent-soft); }
 .plan-day .daytable td { white-space: nowrap; }
 .plan-day .daytable th { text-align: left; }
 .plan-meta { margin: .4rem 0 0; }
+.plan-day .daytable td.plan-x { width: 1%; text-align: right; }
+.plan-removed { list-style: none; margin: .4rem 0 0; padding: 0; display: grid; gap: .3rem; font-size: .92rem; }
+.plan-adjust { margin: .6rem 0; }
 .plan-warn { list-style: none; margin: .4rem 0; padding: 0; display: grid; gap: .3rem; }
 .plan-warn .notice { margin: 0; }
 .plan-summary, .plan-shop { margin-top: .9rem; }
