@@ -105,7 +105,7 @@ export default {
           <p class="plan-meta">
             <template v-if="d.fixed">Jour fixe : le repas est un bloc estimé, sans facteur de portion.</template>
             <template v-else>Portions <b>×{{ n(d.factor) }}</b><template v-if="adjusted(d)"> (tirage ×{{ n2(d.base) }} · ajustements ×{{ n2(d.mult) }})</template></template>
-            <template v-if="d.budget !== null"> · {{ d.fixed ? 'cible' : 'cible de maintien' }} <b>{{ kcal(d.budget) }} kcal</b><template v-if="adjusted(d)"> · cible ajustée <b>{{ kcal(d.goal) }} kcal</b></template> · écart <b>{{ sign(d.delta) }} kcal</b></template>
+            <template v-if="d.budget !== null"> · {{ d.fixed ? 'cible' : 'cible de maintien' }} <b>{{ kcal(d.budget) }} kcal</b> · écart <b>{{ sign(d.delta) }} kcal</b></template>
           </p>
           <div v-if="!d.fixed" class="globalfactor plan-adjust">
             <label>Ajustement du jour <b>×{{ n2(d.adjust) }}</b>
