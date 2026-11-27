@@ -177,3 +177,20 @@ test('règle : les repas du recueil n\'utilisent que les aliments de la liste', 
   const w = await world();
   for (const m of w.meals) for (const l of m.lines) assert.ok(!l.missing, `${m.id} → ${l.missingId}`);
 });
+
+test('règle : repas au blender (tag « Blender », mixage dans la préparation, lait écrémé par défaut, jamais pendant l\'effort)', async () => {
+  const w = await world();
+  const blender = w.meals.filter((m) => m.manualTags.includes('Blender'));
+  assert.ok(blender.length >= 20, 'au moins une vingtaine de repas au blender');
+  for (const c of ['Petit-déjeuner', 'Collation', 'Récupération', 'Dîner']) assert.ok(blender.some((m) => m.category === c), `repas au blender : ${c}`);
+  assert.ok(blender.some((m) => m.contexts.includes('Petit-déjeuner de sortie longue')), 'au moins un petit-déjeuner de sortie longue au blender');
+  for (const m of blender) {
+    assert.match(m.prep, /mix/i, `${m.id} : la préparation doit mentionner le mixage`);
+    assert.notEqual(m.category, "Pendant l'effort", m.id);
+    assert.notEqual(m.category, 'Repas plaisir', m.id);
+    assert.ok(!m.lines.some((l) => l.id === 'lait-demi-ecreme'), `${m.id} : lait écrémé par défaut dans les recettes au blender`);
+    if (m.category === 'Dîner') assert.ok(m.manualTags.includes('Chaud'), `${m.id} : soupes et purées au dîner, servies chaudes`);
+  }
+  // le déjeuner reste une salade froide : aucune recette au blender à ce créneau
+  assert.ok(!blender.some((m) => m.category === 'Déjeuner'));
+});
