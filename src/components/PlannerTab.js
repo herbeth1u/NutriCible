@@ -21,7 +21,8 @@ export default {
     const hasFixed = computed(() => !!view.value?.days.some((d) => d.fixed));
     const toMyDayDisabled = (d) => !d.items.some((it) => it.meal && !it.meal.incomplete);
     const sameAsTemplate = computed(() => !S.state.plan || S.state.plan.days.every((d, i) => d.dayType === S.plannerCtx.value.week[i]?.dayType));
-    const warnings = (label) => view.value.warnings.filter((w) => w.day === label);
+    // Avertissements (règle non tenue, jaune) et informations (à savoir, bleu) d'un jour (ou de la semaine : `label` null).
+    const warnings = (label, level = 'warn') => view.value.warnings.filter((w) => w.day === label && w.level === level);
     // Écart signé, arrondi à l'unité comme tout l'affichage : jamais « -0 » ni « +0 ».
     const sign = C.fmtSigned;
     const sheet = (d, it) => S.openMealSheet(it.id, null, { portion: d.factor, replaceWhere: { where: 'plan', day: d.index, mealId: it.id } });
@@ -68,6 +69,10 @@ export default {
           <b>À noter pour la semaine</b>
           <ul class="plan-warn"><li v-for="w in warnings(null)" :key="w.code + w.text">⚠ {{ w.text }}</li></ul>
         </div>
+        <div v-if="warnings(null, 'info').length" class="notice info" role="status" aria-live="polite">
+          <b>Information</b>
+          <ul class="plan-warn"><li v-for="w in warnings(null, 'info')" :key="w.code + w.text">ℹ {{ w.text }}</li></ul>
+        </div>
 
         <article v-for="d in view.days" :key="d.index" class="card day plan-day" :aria-labelledby="'plan-h-' + d.index">
           <div class="card-top">
@@ -79,6 +84,7 @@ export default {
             </label>
           </div>
           <ul v-if="warnings(d.label).length" class="plan-warn" role="status"><li v-for="w in warnings(d.label)" :key="w.code + w.text" class="notice warn">⚠ {{ w.text }}</li></ul>
+          <ul v-if="warnings(d.label, 'info').length" class="plan-warn" role="status"><li v-for="w in warnings(d.label, 'info')" :key="w.code + w.text" class="notice info">ℹ {{ w.text }}</li></ul>
           <table class="daytable">
             <caption class="sr-only">Repas du {{ d.label }}</caption>
             <tbody>

@@ -1,5 +1,12 @@
 /* src/styles/features.css — styles des fonctionnalités ajoutées après la v1 (curseurs globaux de portions, etc.). */
 
+/* --- information (bleu) : à savoir, sans gravité, à distinguer de l'avertissement jaune (.warn) */
+:root { --info-bg: #e2edfb; --info-ink: #123a6b; --info: #3b77c4; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --info-bg: #16304f; --info-ink: #cfe2fb; --info: #5b93d8; } }
+:root[data-theme="dark"] { --info-bg: #16304f; --info-ink: #cfe2fb; --info: #5b93d8; }
+.notice.info { background: var(--info-bg); color: var(--info-ink); border-color: var(--info); }
+.badge.info { background: var(--info-bg); color: var(--info-ink); border-color: var(--info); }
+
 /* --- curseur global de portions (Ma journée, journées types) */
 .globalfactor { display: flex; flex-wrap: wrap; gap: .3rem .7rem; align-items: center; padding: .5rem .7rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface2); margin: .5rem 0; }
 .globalfactor label { display: grid; gap: .15rem; flex: 1 1 11rem; font-size: .9rem; }
