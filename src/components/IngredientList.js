@@ -33,7 +33,7 @@ export default {
           <template v-else>{{ l.food.name }}<abbr v-if="l.food.estimated" title="valeur estimée">*</abbr></template>
         </span>
         <span v-if="l.food && l.food.convertible" class="seg" role="group" :aria-label="'État de pesée : ' + l.food.name">
-          <button type="button" :aria-pressed="stateOf(l) === 'cru'" @click="disp[l.id] = 'cru'">Cru</button>
+          <button type="button" :aria-pressed="stateOf(l) === 'cru'" @click="disp[l.id] = 'cru'">{{ l.food.state === 'surgelé' ? 'Surgelé' : 'Cru' }}</button>
           <button type="button" :aria-pressed="stateOf(l) === 'cuit'" @click="disp[l.id] = 'cuit'">Cuit</button>
         </span>
         <button v-if="canSubstitute(l, i)" type="button" class="icon subbtn" :aria-label="'Substituer ' + l.food.name" title="Substituer un aliment" @click="substitute(l, i)">⇄</button>

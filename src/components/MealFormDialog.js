@@ -108,7 +108,7 @@ export default {
               <input type="number" min="0" step="0.5" :value="portions(l)" @input="setPortions(l, $event.target.value)"> × {{ food(l.id).portion.label }}
             </label>
             <span v-if="food(l.id) && food(l.id).convertible" class="seg" role="group" aria-label="État de pesée">
-              <button type="button" :aria-pressed="stateOf(l) === 'cru'" @click="disp[l.id] = 'cru'">Cru</button>
+              <button type="button" :aria-pressed="stateOf(l) === 'cru'" @click="disp[l.id] = 'cru'">{{ food(l.id).state === 'surgelé' ? 'Surgelé' : 'Cru' }}</button>
               <button type="button" :aria-pressed="stateOf(l) === 'cuit'" @click="disp[l.id] = 'cuit'">Cuit</button>
             </span>
             <button v-if="food(l.id)" type="button" class="icon subbtn" :aria-expanded="subOpen === i" :aria-label="'Substituer ' + food(l.id).name" title="Substituer cet aliment" @click="toggleSub(i)">⇄</button>

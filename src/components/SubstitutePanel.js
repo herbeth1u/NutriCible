@@ -27,7 +27,7 @@ export default {
     const shown = (food, ref0) => {
       const q = ref0 * props.factor;
       const state = props.mode === 'calc' ? food.state : C.weighState(food);
-      return { q: food.convertible ? C.convertQty(food, q, food.state, state) : q, state: food.convertible ? state : null };
+      return { q: food.convertible ? C.convertQty(food, q, food.state, state) : q, state: food.convertible ? C.stateLabel(food, state) : null };
     };
     const source = computed(() => (base.value ? { ...shown(base.value, props.qty), macros: C.scale(base.value.per100, props.qty / 100) } : null));
     const baseHas = (id) => !!base.value && base.value.per100[id] > 0;

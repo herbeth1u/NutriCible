@@ -81,6 +81,51 @@ test('cru/cuit : les macros ne changent pas quel que soit l\'état affiché (tou
   assert.ok(n >= 15, `${n} aliments ⇄ attendus`);
 });
 
+test('cru/cuit : « surgelé » est le côté cru (aliment ⇄ dont l\'état de référence est surgelé)', async () => {
+  const w = await world();
+  const m = w.foodIdx.get('melange-mangue-ananas-surgele');
+  assert.ok(m.convertible, 'mélange surgelé ⇄');
+  assert.equal(m.state, 'surgelé');
+  assert.equal(C.weighState(m), 'cru', 'pesé surgelé = côté cru');
+  assert.equal(C.otherState('surgelé'), 'cuit');
+  assert.equal(C.otherState('cuit'), 'cru');
+  // surgelé → cuit : le poids est multiplié par coef ; surgelé ↔ cru : aucune conversion
+  near(assert, C.convertQty(m, 100, 'surgelé', 'cuit'), 100 * m.coef);
+  near(assert, C.convertQty(m, 100 * m.coef, 'cuit', 'surgelé'), 100);
+  near(assert, C.convertQty(m, 100, 'surgelé', 'cru'), 100);
+  assert.equal(C.per100In(m, 'cru'), m.per100);
+  assert.equal(C.per100In(m, 'surgelé'), m.per100);
+  // les valeurs pour 100 g cuit sont plus concentrées ; la portion garde les mêmes macros
+  const cuit = C.per100In(m, 'cuit');
+  near(assert, cuit.kcal, m.per100.kcal / m.coef);
+  const a = C.scale(m.per100, 150 / 100);
+  const b = C.scale(cuit, C.convertQty(m, 150, 'surgelé', 'cuit') / 100);
+  for (const k of C.MACRO_KEYS) near(assert, a[k], b[k], 1e-9);
+  const back = C.per100ToRef(m, 'cuit', cuit);
+  for (const k of C.MACRO_KEYS) near(assert, back[k], m.per100[k], 1e-9);
+  assert.equal(C.stateLabel(m, 'cru'), 'surgelé');
+  assert.equal(C.stateLabel(m, 'cuit'), 'cuit');
+  assert.equal(C.stateLabel(w.foodIdx.get('pomme'), 'cru'), 'cru');
+  // les fruits surgelés existants (non ⇄) ne sont pas touchés
+  assert.equal(w.foodIdx.get('fraises-surgelees').convertible, false);
+  assert.equal(C.isConvertible({ state: 'surgelé', coef: 0.8 }), true);
+  assert.equal(C.isConvertible({ state: 'surgelé' }), false);
+  assert.equal(C.isConvertible({ state: 'égoutté', coef: 0.8 }), false);
+});
+
+test('cru/cuit : une modification utilisateur des valeurs garde coef, pesée et état surgelé', async () => {
+  const w = await world({ edits: { 'melange-mangue-ananas-surgele': { per100: { kcal: 60, protein: 0.6, carbs: 12, fat: 0.5, fiber: 1.5 } }, pomme: { note: 'ma note' } } });
+  const m = w.foodIdx.get('melange-mangue-ananas-surgele');
+  assert.equal(m.per100.kcal, 60);
+  assert.equal(m.state, 'surgelé');
+  assert.equal(m.coef, 0.8);
+  assert.equal(m.weigh, 'cru');
+  assert.equal(m.convertible, true);
+  const p = w.foodIdx.get('pomme');
+  assert.equal(p.note, 'ma note');
+  assert.ok(p.coef > 0 && p.season === 'automne-hiver' && p.portion.g === 150);
+});
+
 test('cru/cuit : un repas garde les mêmes totaux, ligne par ligne', async () => {
   const w = await world();
   const m = w.mealIdx.get('din-poulet-courgette-champignons');
@@ -118,8 +163,14 @@ test('aliment composé : valeurs calculées depuis la recette (pain T150, confit
   const levure = w.internalIdx.get('i-levure-seche').per100;
   const miel = w.foodIdx.get('miel').per100;
   near(assert, pain.per100.kcal, 0.65 * farine.kcal + 0.0075 * levure.kcal + 0.003 * miel.kcal, 1e-9);
-  const conf = w.foodIdx.get('confiture-maison');
-  near(assert, conf.per100.carbs, 30 + 0.7 * w.internalIdx.get('i-quetsche-mirabelle').per100.carbs, 1e-9);
+  // deux confitures distinctes : chacune calculée depuis son propre fruit (aliment explicite, plus d'ingrédient interne)
+  assert.equal(w.internalIdx.has('i-quetsche-mirabelle'), false);
+  for (const [id, fruit] of [['confiture-maison', 'quetsches'], ['confiture-maison-mirabelles', 'mirabelles']]) {
+    const conf = w.foodIdx.get(id);
+    assert.equal(conf.composed, true);
+    near(assert, conf.per100.carbs, 30 + 0.7 * w.foodIdx.get(fruit).per100.carbs, 1e-9);
+    near(assert, conf.per100.kcal, 0.3 * w.internalIdx.get('i-sucre-blanc').per100.kcal + 0.7 * w.foodIdx.get(fruit).per100.kcal, 1e-9);
+  }
 });
 
 test('aliment composé : une modification crée une surcharge réinitialisable', async () => {

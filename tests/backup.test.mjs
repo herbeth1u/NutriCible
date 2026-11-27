@@ -22,6 +22,18 @@ test('sauvegarde : aller-retour sans perte (profil fictif, repas et aliments per
   assert.equal(r.exportedAt, '2026-11-20T10:00:00.000Z');
 });
 
+test('sauvegarde : un aliment perso ⇄ à l\'état de référence « surgelé » garde coef et pesée', () => {
+  const frozen = { ...food('perso-surgele', 'Mon surgelé'), state: 'surgelé', coef: 0.8, weigh: 'cru' };
+  const noWeigh = { ...food('perso-surgele-2', 'Mon surgelé 2'), state: 'surgelé', coef: 0.75 };
+  const u = user({ foods: [frozen, noWeigh] });
+  const r = parseBackup(serialize(u, new Date('2026-11-27T10:00:00Z')));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.data.foods[0], frozen);
+  assert.equal(r.data.foods[1].coef, 0.75);
+  assert.equal(r.data.foods[1].weigh, 'cru', 'pesée par défaut : le côté cru de l\'état surgelé');
+  assert.equal(FORMAT, 3, 'aucun changement de format : pas de migration');
+});
+
 test('sauvegarde : le fichier est identifié et nommé avec la date', () => {
   const f = JSON.parse(serialize(emptyUser()));
   assert.equal(f.app, APP);

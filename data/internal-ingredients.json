@@ -4,7 +4,6 @@
     {"id":"i-farine-t150","name":"Farine de blé T150","per100":{"kcal":338,"protein":12,"carbs":62,"fat":2,"fiber":11},"estimated":true,"note":"Ciqual (estimé)."},
     {"id":"i-levure-seche","name":"Levure sèche de boulanger","per100":{"kcal":325,"protein":40,"carbs":14,"fat":7.5,"fiber":27},"estimated":true,"note":"Ciqual (estimé). Quantités négligeables."},
     {"id":"i-sucre-blanc","name":"Sucre blanc","per100":{"kcal":400,"protein":0,"carbs":100,"fat":0,"fiber":0},"estimated":true,"note":"Ciqual (estimé)."},
-    {"id":"i-quetsche-mirabelle","name":"Quetsches ou mirabelles","per100":{"kcal":58,"protein":0.7,"carbs":12.5,"fat":0.2,"fiber":1.6},"estimated":true,"note":"Ciqual (estimé)."},
     {"id":"i-biscuit-biscoff","name":"Biscuits Lotus Biscoff","per100":{"kcal":480,"protein":4.9,"carbs":73,"fat":17.5,"fiber":1.2},"estimated":true,"note":"Étiquette approximative (estimé)."},
     {"id":"i-pate-biscoff","name":"Pâte à tartiner Biscoff","per100":{"kcal":575,"protein":3.5,"carbs":57,"fat":35,"fiber":0.5},"estimated":true,"note":"Étiquette approximative (estimé)."},
     {"id":"i-beurre-doux","name":"Beurre doux","per100":{"kcal":745,"protein":0.7,"carbs":0.6,"fat":82,"fiber":0},"estimated":true,"note":"Ciqual (estimé)."},

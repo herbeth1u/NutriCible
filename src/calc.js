@@ -44,28 +44,35 @@ export const unitOf = (food) => (food && food.unit === 'ml' ? 'ml' : 'g');
 export const normalize = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae').trim();
 
 // ---------------------------------------------------------------- cru / cuit
-// coef = poids cuit ÷ poids cru. Les nutriments d'une portion ne changent pas : seul le poids change.
+// coef = poids cuit ÷ poids cru (ou ÷ poids surgelé : « surgelé » est un état côté cru). Les nutriments d'une portion ne changent pas : seul le poids change.
 
-export const isConvertible = (f) => !!f && typeof f.coef === 'number' && f.coef > 0 && (f.state === 'cru' || f.state === 'cuit');
-export const otherState = (s) => (s === 'cru' ? 'cuit' : 'cru');
-/** État de pesée habituel (celui qu'on affiche par défaut). */
-export const weighState = (f) => (isConvertible(f) ? (f.weigh === 'cru' || f.weigh === 'cuit' ? f.weigh : f.state) : f?.state);
+/** États « côté cru » : « surgelé » (fruits surgelés) se pèse avant cuisson, donc il vaut « cru » pour la conversion. */
+export const RAW_STATES = ['cru', 'surgelé'];
+/** Côté de la paire cru/cuit auquel appartient un état : « cuit », ou « cru » pour tous les états côté cru. */
+export const side = (s) => (s === 'cuit' ? 'cuit' : 'cru');
+
+export const isConvertible = (f) => !!f && typeof f.coef === 'number' && f.coef > 0 && (f.state === 'cuit' || RAW_STATES.includes(f.state));
+export const otherState = (s) => (side(s) === 'cru' ? 'cuit' : 'cru');
+/** État de pesée habituel (« cru » ou « cuit » : c'est ce que les boutons d'affichage manipulent). */
+export const weighState = (f) => (isConvertible(f) ? (f.weigh === 'cru' || f.weigh === 'cuit' ? f.weigh : side(f.state)) : f?.state);
+/** Libellé d'un côté pour un aliment : « surgelé » remplace « cru » pour un aliment dont l'état de référence est surgelé. */
+export const stateLabel = (f, s) => (side(s) === 'cru' && f?.state === 'surgelé' ? 'surgelé' : s);
 
 /** Convertit une quantité (g) d'un état à l'autre. */
 export function convertQty(food, qty, from, to) {
-  if (!isConvertible(food) || from === to) return qty;
-  return from === 'cru' ? qty * food.coef : qty / food.coef;
+  if (!isConvertible(food) || side(from) === side(to)) return qty;
+  return side(from) === 'cru' ? qty * food.coef : qty / food.coef;
 }
 
 /** Valeurs pour 100 g dans un état donné (dérivées de l'état de référence par le coefficient). */
 export function per100In(food, state) {
-  if (!isConvertible(food) || state === food.state) return food.per100;
+  if (!isConvertible(food) || side(state) === side(food.state)) return food.per100;
   return food.state === 'cuit' ? scale(food.per100, food.coef) : scale(food.per100, 1 / food.coef);
 }
 
 /** Inverse de per100In : ramène des valeurs saisies dans `state` vers l'état de référence. */
 export function per100ToRef(food, state, p) {
-  if (!isConvertible(food) || state === food.state) return p;
+  if (!isConvertible(food) || side(state) === side(food.state)) return p;
   return food.state === 'cuit' ? scale(p, 1 / food.coef) : scale(p, food.coef);
 }
 
