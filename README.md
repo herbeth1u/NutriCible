@@ -1,6 +1,6 @@
 # NutriCible
 
-Application web **statique** (sans étape de build) dont le cœur est un **recueil de repas** pour une phase de **maintien du poids** : 93 repas répartis en 7 catégories, des journées types, des cibles calculées depuis ton profil et un export CSV pour Notion.
+Application web **statique** (sans étape de build) dont le cœur est un **recueil de repas** réparti en 7 catégories, pour une phase de **maintien du poids** : des journées types, des cibles calculées depuis ton profil et un export CSV pour Notion.
 
 - Site : https://herbeth1u.github.io/NutriCible/ (voir « Mettre en ligne » plus bas)
 - Pile : JavaScript moderne en modules ES, **Vue 3** (copie vendorisée, sans build), CSS maison, tests avec `node --test`.
