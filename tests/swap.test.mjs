@@ -95,7 +95,7 @@ test('swap : ne modifie ni les repas ni la liste passés en paramètre', () => {
 });
 
 // ------------------------------------------------------------------ avec les données du projet
-test('suggestions : seule la catégorie du créneau, jamais le repas actuel ni un repas déjà dans la semaine, triées et limitées', async () => {
+test('suggestions : seule la catégorie du créneau, jamais le repas actuel, triées et limitées (un repas déjà dans la semaine peut être proposé)', async () => {
   const w = await world();
   const { limit, weights } = w.config.planner.swap;
   let checked = 0;
@@ -103,14 +103,12 @@ test('suggestions : seule la catégorie du créneau, jamais le repas actuel ni u
     const ctx = plannerCtx(w, profile);
     for (const seed of [1, 7920, 15839, 23758, 31677]) {
       const plan = generateWeek(ctx, { seed });
-      const inWeek = new Set(plan.days.flatMap((d) => d.meals.map(([, id]) => id)));
       plan.days.forEach((d, di) => {
         d.meals.forEach(([slot, id], mi) => {
           const where = `${profile ? profile.sex : 'sans profil'}, graine ${seed}, ${d.label}, ${slot}`;
           const rows = rankMealSwaps({ base: ctx.mealIdx.get(id), meals: swapCandidates(ctx, plan, di, mi), weights, limit });
           assert.ok(rows.length <= limit, where);
           assert.ok(rows.every((r) => r.meal.category === slot), `${where} : autre catégorie`);
-          assert.ok(rows.every((r) => !inWeek.has(r.meal.id)), `${where} : repas déjà dans la semaine`);
           assert.ok(rows.every((r) => r.meal.id !== id), `${where} : repas actuel`);
           assert.ok(rows.every((r) => r.meal.contexts.some((c) => contextsFor(w.config, dayTypeOf(w.config, d.dayType)).includes(c))), `${where} : contexte`);
           for (let i = 1; i < rows.length; i += 1) assert.ok(rows[i - 1].distance <= rows[i].distance, `${where} : tri`);
