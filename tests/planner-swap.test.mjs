@@ -109,17 +109,31 @@ test('swapCandidates : sur le jour fixe, seuls les blocs cheat meal ; aucun bloc
   });
 });
 
-test('swapCandidates : exclut le repas actuel, les autres repas du jour et ceux des autres jours ; indices invalides : liste vide', async () => {
+test('swapCandidates : exclut seulement le repas actuel ; un repas déjà dans la semaine reste proposé (ingrédients déjà achetés) ; indices invalides : liste vide', async () => {
   const w = await world();
   const ctx = plannerCtx(w);
+  let inWeek = 0;
+  for (const seed of [SEED, 11, 12]) {
+    const plan = P.generateWeek(ctx, { seed });
+    const all = new Set(plan.days.flatMap((d) => d.meals.map(([, id]) => id)));
+    plan.days.forEach((d, di) => d.meals.forEach(([, current], mi) => {
+      const cands = P.swapCandidates(ctx, plan, di, mi);
+      assert.ok(cands.every((m) => m.id !== current), `${d.label} : le repas actuel est proposé`);
+      // un repas déjà dans la semaine (un autre jour, ou un autre créneau du jour) est proposé dès qu'il tient les règles : information seulement
+      for (const id of all) {
+        const m = ctx.mealIdx.get(id);
+        if (id === current || m.incomplete) continue;
+        const warned = P.swapIssues(ctx, plan, di, mi, m).some((i) => i.level === 'warn');
+        assert.equal(cands.some((c) => c.id === id), !warned, `${d.label} : ${m.name}`);
+      }
+      inWeek += cands.filter((m) => all.has(m.id)).length;
+    }));
+  }
+  assert.ok(inWeek > 0, 'au moins un repas déjà dans la semaine est proposé');
   const plan = P.generateWeek(ctx, { seed: SEED });
-  const all = new Set(plan.days.flatMap((d) => d.meals.map(([, id]) => id)));
-  plan.days.forEach((d, di) => d.meals.forEach((_, mi) => {
-    for (const m of P.swapCandidates(ctx, plan, di, mi)) assert.ok(!all.has(m.id), `${d.label} : ${m.name} est déjà dans la semaine`);
-  }));
   assert.deepEqual(P.swapCandidates(ctx, plan, 0, 99), []);
   assert.deepEqual(P.swapCandidates(ctx, plan, 99, 0), []);
-  // un repas retiré n'est plus dans la semaine : il peut être proposé (le rétablir ensuite le ferait signaler comme répété)
+  // un repas retiré n'est pas compté comme « déjà dans la semaine » (le rétablir ensuite le ferait signaler comme répété)
   const removed = P.removeMealAt(plan, 0, 1);
   assert.ok(P.swapCandidates(ctx, removed, 0, 0).length > 0);
 });
@@ -145,12 +159,12 @@ test('swapIssues : les bonnes pastilles (déjà dans la semaine, autre catégori
   const rognons = plan.days[0].meals[lundiDinner][1];
   // le dîner d'abats du lundi proposé le mardi : déjà dans la semaine et second repas d'abats
   assert.deepEqual(P.swapIssues(ctx, plan, 1, mardiDinner, meal(rognons)), [
-    { code: 'used', label: 'déjà dans la semaine' },
-    { code: 'offal', label: '2e repas d\'abats' },
+    { code: 'used', label: 'déjà dans la semaine', level: 'info' }, // information : pas une règle
+    { code: 'offal', label: '2e repas d\'abats', level: 'warn' },
   ]);
   // un déjeuner à la place d'un dîner : autre catégorie
   const dej = w.meals.find((m) => m.category === 'Déjeuner' && !plan.days.some((d) => d.meals.some(([, id]) => id === m.id)) && m.contexts.some((c) => P.contextsFor(w.config, P.dayTypeOf(w.config, 'veille-plaisir')).includes(c)));
-  assert.deepEqual(codes(P.swapIssues(ctx, plan, 1, mardiDinner, dej)), ['category']);
+  assert.deepEqual(P.swapIssues(ctx, plan, 1, mardiDinner, dej), [{ code: 'category', label: 'autre catégorie', level: 'warn' }]);
   // un repas plaisir (pizza) un jour de cheat meal : sa catégorie convient, pas son contexte
   const cheatDay = plan.days.findIndex((d) => P.isFixedType(w.config, d.dayType));
   assert.deepEqual(codes(P.swapIssues(ctx, plan, cheatDay, 0, meal('pla-pizza-margherita'))), ['context']);
@@ -182,13 +196,13 @@ test('swapIssues : le libellé du quota d\'abats suit config.planner.rules.maxOf
   assert.deepEqual(codes(P.swapIssues(ctx, one, 3, slotIndex(one, 3, 'Dîner'), offal[2])), []);
 });
 
-test('swapCandidates et swapIssues disent la même chose : proposé ⇔ complet, pas le repas actuel, aucune pastille', async () => {
+test('swapCandidates et swapIssues disent la même chose : proposé ⇔ complet, pas le repas actuel, aucun avertissement (l\'information « déjà dans la semaine » n\'exclut pas)', async () => {
   const w = await world();
   const ctx = plannerCtx(w);
   for (const seed of [SEED, 11, 12]) {
     const plan = P.generateWeek(ctx, { seed });
     plan.days.forEach((d, di) => d.meals.forEach(([, current], mi) => {
-      const expected = w.meals.filter((m) => !m.incomplete && m.id !== current && P.swapIssues(ctx, plan, di, mi, m).length === 0).map((m) => m.id);
+      const expected = w.meals.filter((m) => !m.incomplete && m.id !== current && P.swapIssues(ctx, plan, di, mi, m).every((i) => i.level === 'info')).map((m) => m.id);
       assert.deepEqual(idsOf(P.swapCandidates(ctx, plan, di, mi)), expected, `${d.label}, graine ${seed}`);
     }));
   }
@@ -241,18 +255,32 @@ test('après un remplacement, un repas signalé donne l\'avertissement habituel 
   const milkCocoa = w.meals.find((m) => P.hasMilkCocoa(m, w.config) && m.category === 'Récupération');
   const view = P.viewPlan(ctx, P.replacePlanMealAt(plan, 0, rec, milkCocoa.id));
   assert.ok(view.warnings.some((x) => x.code === 'milk-cocoa' && x.day === plan.days[0].label));
-  // un repas déjà présent ailleurs : « revient 2 fois »
+  // un repas déjà présent ailleurs : « revient 2 fois », en information (niveau `info`) et non en avertissement
   const dejMardi = plan.days[1].meals[slotIndex(plan, 1, 'Déjeuner')][1];
   const rep = P.viewPlan(ctx, P.replacePlanMealAt(plan, 0, slotIndex(plan, 0, 'Déjeuner'), dejMardi));
-  assert.ok(rep.warnings.some((x) => x.code === 'repeat'));
-  // un remplacement proposé ne crée aucun avertissement alimentaire nouveau
+  const repeat = rep.warnings.filter((x) => x.code === 'repeat');
+  assert.equal(repeat.length, 1);
+  assert.equal(repeat[0].level, 'info');
+  assert.equal(repeat[0].day, null);
+  assert.ok(rep.warnings.filter((x) => x.level === 'warn').every((x) => P.viewPlan(ctx, plan).warnings.some((b) => b.code === x.code && b.day === x.day)), 'aucun avertissement nouveau');
+  // un autre créneau : l'avertissement habituel « catégorie » apparaît dans le planning, au jour concerné
+  const mardiDinner = slotIndex(plan, 1, 'Dîner');
+  const dej = w.meals.find((m) => m.category === 'Déjeuner' && !plan.days.some((d) => d.meals.some(([, id]) => id === m.id)));
+  const cat = P.viewPlan(ctx, P.replacePlanMealAt(plan, 1, mardiDinner, dej.id)).warnings.filter((x) => x.code === 'category');
+  assert.equal(cat.length, 1);
+  assert.equal(cat[0].level, 'warn');
+  assert.equal(cat[0].day, plan.days[1].label);
+  assert.match(cat[0].text, new RegExp(`« ${dej.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} » est un repas « Déjeuner » placé sur le créneau « Dîner »`));
+  assert.ok(!P.viewPlan(ctx, plan).warnings.some((x) => x.code === 'category'), 'un tirage ne produit jamais cet avertissement');
+  // un remplacement proposé ne crée aucun avertissement alimentaire nouveau (seule l'information « déjà dans la semaine » peut apparaître)
   const base = new Set(P.viewPlan(ctx, plan).warnings.map((x) => x.code + x.day));
   plan.days.forEach((d, di) => d.meals.forEach((_, mi) => {
-    const [first] = P.swapCandidates(ctx, plan, di, mi);
-    if (!first) return;
-    for (const x of P.viewPlan(ctx, P.replacePlanMealAt(plan, di, mi, first.id)).warnings) {
-      if (['kcal-gap', 'floor'].includes(x.code)) continue; // l'écart de budget dépend des portions, pas d'une règle alimentaire
-      assert.ok(base.has(x.code + x.day), `${d.label} : avertissement « ${x.code} » après remplacement par ${first.name}`);
+    for (const cand of P.swapCandidates(ctx, plan, di, mi).slice(0, 6)) {
+      for (const x of P.viewPlan(ctx, P.replacePlanMealAt(plan, di, mi, cand.id)).warnings) {
+        if (['kcal-gap', 'floor'].includes(x.code)) continue; // l'écart de budget dépend des portions, pas d'une règle alimentaire
+        if (x.level === 'info') { assert.equal(x.code, 'repeat'); continue; }
+        assert.ok(base.has(x.code + x.day), `${d.label} : avertissement « ${x.code} » après remplacement par ${cand.name}`);
+      }
     }
   }));
 });
