@@ -7,7 +7,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { kcalWarning } from '../src/calc.js';
+import { kcalWarning, RAW_STATES } from '../src/calc.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MACROS = ['kcal', 'protein', 'carbs', 'fat', 'fiber'];
@@ -102,7 +102,7 @@ export function validateData({ foods, internal, meals, days, config }) {
     for (const k of STORED_TOTAL_KEYS) if (k in f) err(`${where} : champ « ${k} » interdit (valeurs pour 100 g dans per100)`);
     if (f.coef !== undefined) {
       if (!isNum(f.coef) || f.coef <= 0 || f.coef > 6) err(`${where} : coefficient cuit/cru invalide`);
-      if (f.state !== 'cru' && f.state !== 'cuit') err(`${where} : un aliment ⇄ doit avoir l'état de référence « cru » ou « cuit »`);
+      if (f.state !== 'cuit' && !RAW_STATES.includes(f.state)) err(`${where} : un aliment ⇄ doit avoir l'état de référence « cru », « cuit » ou « surgelé »`);
       if (f.weigh !== undefined && f.weigh !== 'cru' && f.weigh !== 'cuit') err(`${where} : état de pesée invalide`);
     }
     if (Array.isArray(f.recipe)) {
