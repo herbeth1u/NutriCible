@@ -163,8 +163,14 @@ test('aliment composé : valeurs calculées depuis la recette (pain T150, confit
   const levure = w.internalIdx.get('i-levure-seche').per100;
   const miel = w.foodIdx.get('miel').per100;
   near(assert, pain.per100.kcal, 0.65 * farine.kcal + 0.0075 * levure.kcal + 0.003 * miel.kcal, 1e-9);
-  const conf = w.foodIdx.get('confiture-maison');
-  near(assert, conf.per100.carbs, 30 + 0.7 * w.internalIdx.get('i-quetsche-mirabelle').per100.carbs, 1e-9);
+  // deux confitures distinctes : chacune calculée depuis son propre fruit (aliment explicite, plus d'ingrédient interne)
+  assert.equal(w.internalIdx.has('i-quetsche-mirabelle'), false);
+  for (const [id, fruit] of [['confiture-maison', 'quetsches'], ['confiture-maison-mirabelles', 'mirabelles']]) {
+    const conf = w.foodIdx.get(id);
+    assert.equal(conf.composed, true);
+    near(assert, conf.per100.carbs, 30 + 0.7 * w.foodIdx.get(fruit).per100.carbs, 1e-9);
+    near(assert, conf.per100.kcal, 0.3 * w.internalIdx.get('i-sucre-blanc').per100.kcal + 0.7 * w.foodIdx.get(fruit).per100.kcal, 1e-9);
+  }
 });
 
 test('aliment composé : une modification crée une surcharge réinitialisable', async () => {
