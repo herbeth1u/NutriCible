@@ -4,7 +4,7 @@
 
 import { defaultFilters } from './calc.js';
 
-export const TAB_IDS = ['meals', 'days', 'planner', 'targets', 'subs', 'foods'];
+export const TAB_IDS = ['meals', 'planner', 'targets', 'subs', 'foods'];
 export const MEAL_SORTS = ['name', 'kcal', 'protein', 'carbs', 'fiber', 'time'];
 export const FOOD_SORTS = ['name', 'type', 'season', 'kcal', 'protein', 'carbs', 'fat', 'fiber', 'usage'];
 
