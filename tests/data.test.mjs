@@ -160,13 +160,16 @@ test('règle : vocabulaire des sorties (courte, moyenne, longue uniquement)', as
 test('règle : aucun aliment exclu (olives, huiles de noix ou de colza, framboises, vinaigre, herbes, légumes d\'hiver non listés)', async () => {
   const w = await world();
   const banned = /olive(?!s? \(conserve|\b.*sardine)|huile de (noix|colza)|framboise|vinaigre|basilic|persil|ciboulette|coriandre|thym|origan|oignon|échalote|\bail\b|chou|brocoli|épinard|poivron|batavia|salade verte/i;
+  const allowed = new Set(['oignon', 'chou-fleur']); // ajoutés explicitement au recueil (cahier des charges du lot 1) : seuls exceptions à la liste d'exclusion
   for (const f of w.foodIdx.values()) {
-    if (/huile d'olive|sardines à l'huile d'olive/i.test(f.name)) continue;
+    if (/huile d'olive|sardines à l'huile d'olive/i.test(f.name) || allowed.has(f.id)) continue;
     assert.ok(!banned.test(f.name), f.name);
   }
   for (const m of w.meals) {
     const text = `${m.prep} ${m.variant}`.replace(/huile d'olive|l'huile d'olive/gi, '');
-    assert.ok(!/vinaigre|framboise|basilic|persil|ciboulette|coriandre|thym|origan|oignon|échalote|\bail\b|brocoli|épinard|poivron|olives\b/i.test(text), `${m.id} : ${text}`);
+    const uses = (id) => m.lines.some((l) => l.id === id); // « oignon » n'est toléré dans le texte que si le repas utilise l'aliment Oignon
+    assert.ok(!/vinaigre|framboise|basilic|persil|ciboulette|coriandre|thym|origan|échalote|\bail\b|brocoli|épinard|poivron|olives\b/i.test(text), `${m.id} : ${text}`);
+    if (!uses('oignon')) assert.ok(!/oignon/i.test(text), `${m.id} : ${text}`);
   }
 });
 
