@@ -104,7 +104,7 @@
       "salmonFoods": ["saumon"],
       "offalTag": "Abats",
       "maxOffalPerWeek": 1,
-      "milkCocoa": { "milk": ["lait-demi-ecreme"], "cocoa": ["cacao-sucre"], "outings": ["moyenne", "longue"] }
+      "milkCocoa": { "milk": ["lait-demi-ecreme", "lait-ecreme"], "cocoa": ["cacao-sucre"], "outings": ["moyenne", "longue"] }
     },
     "attempts": 60,
     "floor": 0.9,

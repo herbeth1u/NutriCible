@@ -19,7 +19,7 @@ export default {
     const f = reactive({
       name: ex?.name ?? '', type: ex?.type ?? 'Autres', season: ex?.season ?? '', unit: ex?.unit ?? 'g',
       convertible: !!(ex && ex.convertible), refState: ex && ex.convertible ? ex.state : 'cuit', label: ex && !ex.convertible ? ex.state : 'tel quel',
-      coef: ex?.coef ?? 2.5, weigh: ex?.weigh ?? (ex && ex.convertible ? ex.state : 'cuit'), entered: ex && ex.convertible ? ex.state : 'cuit',
+      coef: ex?.coef ?? 2.5, weigh: ex?.weigh ?? (ex && ex.convertible ? C.side(ex.state) : 'cuit'), entered: ex && ex.convertible ? C.side(ex.state) : 'cuit',
       v: Object.fromEntries(KEYS.map((k) => [k, ex ? Math.round(ex.per100[k] * 100) / 100 : 0])),
       portionLabel: ex?.portion?.label ?? '', portionG: ex?.portion?.g ?? null,
       note: ex?.note ?? '', estimated: ex ? !!ex.estimated : false,
@@ -95,7 +95,7 @@ export default {
           <label v-if="!ex" class="check"><input type="checkbox" v-model="f.convertible"> Aliment ⇄ (existe en version crue et cuite)</label>
           <template v-if="f.convertible">
             <div class="grid2">
-              <label>État de référence (quantités des repas) <select v-model="f.refState" :disabled="!!ex"><option value="cru">cru</option><option value="cuit">cuit</option></select></label>
+              <label>État de référence (quantités des repas) <select v-model="f.refState" :disabled="!!ex"><option value="cru">cru</option><option value="cuit">cuit</option><option v-if="f.refState === 'surgelé'" value="surgelé">surgelé</option></select></label>
               <label>Coefficient : poids cuit ÷ poids cru <input type="number" min="0.1" max="6" step="0.01" v-model="f.coef"></label>
               <label>État de pesée habituel <select v-model="f.weigh"><option value="cru">cru</option><option value="cuit">cuit</option></select></label>
             </div>

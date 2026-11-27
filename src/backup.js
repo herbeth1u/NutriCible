@@ -4,7 +4,7 @@
 // être déposée dans le dépôt (le .gitignore exclut les fichiers nutricible-sauvegarde*.json).
 // Pour faire évoluer le format : incrémenter FORMAT et ajouter une migration (n → n+1) dans MIGRATIONS.
 
-import { emptyProfile, normalize } from './calc.js';
+import { emptyProfile, normalize, RAW_STATES, side } from './calc.js';
 import { sanitizeDay } from './day.js';
 import { sanitizePlan } from './planner.js';
 import { WEEK_LENGTH } from './week.js';
@@ -55,7 +55,7 @@ export function sanitizeFood(f) {
   if (str(f.season)) out.season = f.season;
   const portion = cleanPortion(f.portion);
   if (portion) out.portion = portion;
-  if (num(f.coef) > 0 && (out.state === 'cru' || out.state === 'cuit')) { out.coef = f.coef; out.weigh = f.weigh === 'cru' || f.weigh === 'cuit' ? f.weigh : out.state; }
+  if (num(f.coef) > 0 && (out.state === 'cuit' || RAW_STATES.includes(out.state))) { out.coef = f.coef; out.weigh = f.weigh === 'cru' || f.weigh === 'cuit' ? f.weigh : side(out.state); }
   return out;
 }
 
