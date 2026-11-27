@@ -524,15 +524,15 @@ test('liste de courses : un aliment qui revient dans plusieurs repas est cumulé
     ...internal.map(([iid, qty]) => ({ kind: 'internal', id: iid, food: { id: iid, name: w.internalIdx.get(iid).name, unit: 'g', per100: C.normPer100(w.internalIdx.get(iid).per100), convertible: false }, qty, missing: false })),
   ] });
   const days = [
-    { factor: 1, items: [{ slot: 'Dîner', id: 'a', meal: mk('a', [['riz-complet', 260], ['banane', 100]]) }] },
-    { factor: 1.5, items: [{ slot: 'Dîner', id: 'b', meal: mk('b', [['riz-complet', 130], ['banane', 40]], [['i-farine-t150', 100]]) }] },
+    { factor: 1, items: [{ slot: 'Dîner', id: 'a', meal: mk('a', [['riz-complet', 260], ['kiwi', 100]]) }] },
+    { factor: 1.5, items: [{ slot: 'Dîner', id: 'b', meal: mk('b', [['riz-complet', 130], ['kiwi', 40]], [['i-farine-t150', 100]]) }] },
   ];
   const s = P.shoppingList(ctx, days);
   const all = Object.fromEntries(s.groups.flatMap((g) => g.items).map((e) => [e.id, e]));
   near(assert, all['riz-complet'].qty, (260 + 130 * 1.5) / rice.coef, 1e-9);
   assert.equal(all['riz-complet'].state, 'cru');
-  near(assert, all.banane.qty, 100 + 40 * 1.5, 1e-9);
-  assert.equal(all.banane.state, null);
+  near(assert, all.kiwi.qty, 100 + 40 * 1.5, 1e-9);
+  assert.equal(all.kiwi.state, null);
   assert.equal(s.groups.at(-1).type, P.RECIPE_GROUP);
   assert.equal(s.groups.at(-1).items[0].id, 'i-farine-t150');
   assert.equal(s.cheat, false);
