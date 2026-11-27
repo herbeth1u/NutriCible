@@ -6,8 +6,7 @@ import { clampFactor, FACTOR_MAX, FACTOR_MIN } from '../src/day.js';
 import { FICTIVE, plannerCtx, world } from './helpers.mjs';
 
 // Remplacement d'un seul repas du planificateur : replacePlanMealAt, swapCandidates, swapIssues (classement : tests/swap.test.mjs).
-// Graine du tirage : les tests ci-dessous supposent que le lundi contient le dîner d'abats de la semaine. Le tirage dépend du recueil : si l'ajout de repas change ce lundi, choisir une graine qui rétablit cette propriété.
-const SEED = 1; // lundi sortie courte, mardi veille de repas plaisir, mercredi cheat meal, jeudi lendemain de repas plaisir…
+const SEED = 5; // lundi sortie courte, mardi veille de repas plaisir, mercredi cheat meal, jeudi lendemain de repas plaisir…
 const codes = (issues) => issues.map((i) => i.code);
 const idsOf = (list) => list.map((m) => m.id);
 const slotIndex = (plan, di, slot) => plan.days[di].meals.findIndex(([s]) => s === slot);
