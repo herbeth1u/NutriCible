@@ -12,6 +12,11 @@
 // les apports, le bilan, la liste de courses ni « Ma journée » ; il peut être rétabli. `adjust` (semaine, jour) multiplie le
 // facteur calculé par le planificateur ; il ne s'applique pas aux jours fixes (cheat meal).
 //
+// Remplacer un seul repas (`swapCandidates`, `swapIssues`, `replacePlanMealAt`, classement dans src/swap.js) garde le créneau, les repas
+// retirés et les ajustements ; le facteur du jour est recalculé comme d'habitude. Les repas proposés tiennent les règles dures (un repas déjà
+// présent ailleurs dans la semaine reste proposé : c'est une information, pas une règle) ; la recherche libre en propose d'autres, avec
+// une pastille par règle qui ne serait pas tenue.
+//
 // Tirage : générateur pseudo-aléatoire à graine (mulberry32). Même graine + mêmes données = même semaine, ce qui permet
 // de la reproduire et de la tester ; la graine reste interne (jamais affichée). Pour chaque jour, plusieurs tirages sont
 // comparés et le meilleur est gardé ; le facteur de portion (calc.fitFactor) ramène ensuite le jour à son budget. Toutes les
@@ -414,6 +419,76 @@ export function replacePlanMeal(plan, index, fromMealId, toMealId) {
   return next;
 }
 
+// ------------------------------------------------------------------ remplacement d'un seul repas
+// Fenêtre « Remplacer un repas » (src/swap.js classe les repas par proximité) : on garde le créneau, le reste du jour est recalculé
+// par `viewPlan`. Les règles sont celles du tirage (`flagsOf`, `milkCocoaAllowed`, `contextsFor`, `stateOf`) : aucune n'est redéfinie.
+const SWAP_LABELS = {
+  used: 'déjà dans la semaine', // information (niveau « info ») : réutiliser les ingrédients d'un repas déjà prévu est un avantage
+  category: 'autre catégorie',
+  context: 'contexte inadapté',
+  'milk-cocoa': 'lait + cacao réservés aux sorties moyenne et longue',
+};
+const ordinal = (n) => (n === 1 ? '1er' : `${n}e`);
+
+/** Le repas n° `mealIndex` d'un jour et ce qui est déjà pris dans le reste de la semaine (ce repas n'est pas compté). null si absent. */
+function swapSetup(ctx, plan, dayIndex, mealIndex) {
+  const day = plan.days[dayIndex];
+  const entry = day?.meals[mealIndex];
+  const dt = day && dayTypeOf(ctx.config, day.dayType);
+  if (!entry || !dt) return null;
+  const rest = { ...plan, days: plan.days.map((d, i) => (i === dayIndex ? { ...d, meals: d.meals.filter((_, j) => j !== mealIndex) } : d)) };
+  return { slot: entry[0], currentId: entry[1], dt, state: stateOf(ctx, rest, -1) };
+}
+
+/** Ce que `meal` ne tiendrait pas (niveau `warn`) ou ce qu'il faut savoir (niveau `info`) à la place du repas du créneau : [{ code, label, level }]. */
+function swapProblems(ctx, { slot, dt, state }, meal) {
+  const { config } = ctx;
+  const rules = config.planner.rules;
+  const out = [];
+  const add = (code, label = SWAP_LABELS[code], level = 'warn') => out.push({ code, label, level });
+  if (state.used.has(meal.id)) add('used', SWAP_LABELS.used, 'info');
+  if (meal.category !== slot) add('category');
+  if (!meal.contexts.some((c) => contextsFor(config, dt).includes(c))) add('context');
+  if (hasMilkCocoa(meal, config) && !milkCocoaAllowed(config, dt)) add('milk-cocoa');
+  if (isOffal(meal, config) && state.offal >= rules.maxOffalPerWeek) add('offal', `${ordinal(rules.maxOffalPerWeek + 1)} repas d'abats`);
+  return out;
+}
+
+/**
+ * Suggestions pour remplacer le repas n° `mealIndex` du jour `dayIndex` : repas complets de la catégorie du créneau (sur un jour fixe,
+ * les blocs cheat meal : eux seuls ont le contexte du jour), avec un contexte accepté par le type de jour (n'importe lequel, sans la cascade), qui tiennent
+ * lait + cacao et le quota d'abats (sans compter le repas remplacé). Un repas déjà présent ailleurs dans la semaine est proposé (information
+ * `used`, pas une règle) ; le repas actuel est exclu.
+ * Ni classement ni limite : voir `rankMealSwaps` (src/swap.js).
+ */
+export function swapCandidates(ctx, plan, dayIndex, mealIndex) {
+  const setup = swapSetup(ctx, plan, dayIndex, mealIndex);
+  if (!setup) return [];
+  return ctx.meals.filter((m) => !m.incomplete && m.id !== setup.currentId && swapProblems(ctx, setup, m).every((p) => p.level === 'info'));
+}
+
+/**
+ * Pastilles d'un repas proposé : [{ code, label, level }]. Niveau `info` : `used` (déjà dans la semaine, plutôt un avantage). Niveau `warn` :
+ * `category`, `context`, `milk-cocoa` et `offal` (quota d'abats dépassé). Choisir un repas signalé est permis : `auditPlan` affiche
+ * ensuite le même message dans le planning (`repeat` en information, les autres en avertissement).
+ */
+export function swapIssues(ctx, plan, dayIndex, mealIndex, meal) {
+  const setup = swapSetup(ctx, plan, dayIndex, mealIndex);
+  return setup && meal ? swapProblems(ctx, setup, meal) : [];
+}
+
+/**
+ * Remplace le repas n° `mealIndex` d'un jour par `toMealId`, en gardant son créneau. Par rang et non par identifiant (en repli, un
+ * jour peut contenir deux fois le même repas). Les autres jours, les repas retirés et les ajustements ne changent pas.
+ */
+export function replacePlanMealAt(plan, dayIndex, mealIndex, toMealId) {
+  const entry = plan.days[dayIndex]?.meals[mealIndex];
+  if (!entry || entry[1] === toMealId) return plan;
+  const next = clonePlan(plan);
+  next.days[dayIndex].meals[mealIndex][1] = toMealId;
+  return next;
+}
+
 // ------------------------------------------------------------------ lecture d'un planning (tout est dérivé)
 /**
  * Semaine type avec le type de journée de chaque jour : [{ label, dayType }] (days.json : week + days).
@@ -484,7 +559,8 @@ export function auditPlan(ctx, days, week = null) {
   const { config } = ctx;
   const p = config.planner;
   const out = [];
-  const warn = (day, code, text) => out.push({ day, code, text });
+  // `level` : 'warn' (règle non tenue) ou 'info' (à savoir, sans gravité : un repas qui revient réutilise des ingrédients déjà achetés).
+  const warn = (day, code, text, level = 'warn') => out.push({ day, code, text, level });
   const seen = new Map(); // id → jours où le repas apparaît
   let salmon = 0;
   let offal = 0;
@@ -499,6 +575,7 @@ export function auditPlan(ctx, days, week = null) {
       seen.set(it.id, [...(seen.get(it.id) ?? []), d.label]);
       if (isSalmon(it.meal, config)) salmon += 1;
       if (isOffal(it.meal, config)) offal += 1;
+      if (it.meal.category !== it.slot) warn(where, 'category', `« ${it.meal.name} » est un repas « ${it.meal.category} » placé sur le créneau « ${it.slot} ».`);
       if (!it.meal.contexts.some((c) => accepted.includes(c))) warn(where, 'context', `« ${it.meal.name} » ne correspond pas au contexte « ${d.dayType.label} ».`);
       if (hasMilkCocoa(it.meal, config) && !milkCocoaAllowed(config, d.dayType)) warn(where, 'milk-cocoa', `« ${it.meal.name} » : lait et cacao sucré sont réservés aux jours de sortie moyenne ou longue.`);
     }
@@ -510,7 +587,7 @@ export function auditPlan(ctx, days, week = null) {
     }
   }
   for (const [id, labels] of seen) {
-    if (labels.length > 1) warn(null, 'repeat', `« ${mealIndex(ctx).get(id)?.name ?? id} » revient ${labels.length} fois dans la semaine (${labels.join(', ')}).`);
+    if (labels.length > 1) warn(null, 'repeat', `« ${mealIndex(ctx).get(id)?.name ?? id} » revient ${labels.length} fois dans la semaine (${labels.join(', ')}).`, 'info');
   }
   if (week && week.budgetTotal !== null && week.budgetTotal > week.expenditure + 1) {
     warn(null, 'floor', `Le cheat meal est trop copieux pour tenir le maintien : le budget des autres jours est limité à ${fmtNum(p.floor * 100)} % de leur dépense, la semaine reste en surplus d'environ ${fmtKcal(week.budgetTotal - week.expenditure)} kcal.`);

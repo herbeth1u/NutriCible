@@ -1,5 +1,12 @@
 /* src/styles/features.css — styles des fonctionnalités ajoutées après la v1 (curseurs globaux de portions, etc.). */
 
+/* --- information (bleu) : à savoir, sans gravité, à distinguer de l'avertissement jaune (.warn) */
+:root { --info-bg: #e2edfb; --info-ink: #123a6b; --info: #3b77c4; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --info-bg: #16304f; --info-ink: #cfe2fb; --info: #5b93d8; } }
+:root[data-theme="dark"] { --info-bg: #16304f; --info-ink: #cfe2fb; --info: #5b93d8; }
+.notice.info { background: var(--info-bg); color: var(--info-ink); border-color: var(--info); }
+.badge.info { background: var(--info-bg); color: var(--info-ink); border-color: var(--info); }
+
 /* --- curseur global de portions (Ma journée, journées types) */
 .globalfactor { display: flex; flex-wrap: wrap; gap: .3rem .7rem; align-items: center; padding: .5rem .7rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface2); margin: .5rem 0; }
 .globalfactor label { display: grid; gap: .15rem; flex: 1 1 11rem; font-size: .9rem; }
@@ -50,6 +57,7 @@ button.subitem:hover { background: var(--accent-soft); }
 .plan-day .daytable th { text-align: left; }
 .plan-meta { margin: .4rem 0 0; }
 .plan-day .daytable td.plan-x { width: 1%; text-align: right; }
+.plan-day .daytable td.plan-x .icon { padding-inline: .4rem; }
 .plan-removed { list-style: none; margin: .4rem 0 0; padding: 0; display: grid; gap: .3rem; font-size: .92rem; }
 .plan-adjust { margin: .6rem 0; }
 .plan-warn { list-style: none; margin: .4rem 0; padding: 0; display: grid; gap: .3rem; }
@@ -59,3 +67,10 @@ button.subitem:hover { background: var(--accent-soft); }
 .shoplist { list-style: none; margin: 0; padding: 0; columns: 2 15rem; column-gap: 1.5rem; }
 .shoplist li { break-inside: avoid; padding: .12rem 0; }
 .shoplist .q { display: inline-block; min-width: 4.8rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* --- remplacement d'un repas (fenêtre « Remplacer un repas ») */
+.swap-current { margin: 0; padding: .45rem .7rem; border-radius: 8px; background: var(--surface2); }
+.swap-current .macros { margin-top: .2rem; }
+.swap-flags { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .15rem; }
+.swap-flags .badge { margin-left: 0; }
+.swap-delta { color: var(--text); }

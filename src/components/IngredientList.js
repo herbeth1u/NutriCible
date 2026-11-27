@@ -36,7 +36,7 @@ export default {
           <button type="button" :aria-pressed="stateOf(l) === 'cru'" @click="disp[l.id] = 'cru'">Cru</button>
           <button type="button" :aria-pressed="stateOf(l) === 'cuit'" @click="disp[l.id] = 'cuit'">Cuit</button>
         </span>
-        <button v-if="canSubstitute(l, i)" type="button" class="icon subbtn" :aria-label="'Substituer ' + l.food.name" title="Substituer cet aliment" @click="substitute(l, i)">⇄</button>
+        <button v-if="canSubstitute(l, i)" type="button" class="icon subbtn" :aria-label="'Substituer ' + l.food.name" title="Substituer un aliment" @click="substitute(l, i)">⇄</button>
       </li>
     </ul>`,
 };

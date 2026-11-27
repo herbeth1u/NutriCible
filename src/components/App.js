@@ -16,10 +16,11 @@ import ExportDialog from './ExportDialog.js';
 import BackupDialog from './BackupDialog.js';
 import MealSheetDialog from './MealSheetDialog.js';
 import SubstituteDialog from './SubstituteDialog.js';
+import MealSwapDialog from './MealSwapDialog.js';
 
 const TABS = [['meals', 'Repas'], ['days', 'Journées types'], ['planner', 'Planificateur'], ['targets', 'Cibles et hypothèses'], ['subs', 'Substitutions et ajustements'], ['foods', 'Aliments']];
 const VIEWS = { meals: 'meals-tab', days: 'days-tab', planner: 'planner-tab', targets: 'targets-tab', subs: 'substitutions-tab', foods: 'foods-tab' };
-const DIALOGS = { profile: ProfileDialog, meal: MealFormDialog, food: FoodFormDialog, foodDelete: FoodDeleteDialog, export: ExportDialog, backup: BackupDialog, mealSheet: MealSheetDialog, substitute: SubstituteDialog };
+const DIALOGS = { profile: ProfileDialog, meal: MealFormDialog, food: FoodFormDialog, foodDelete: FoodDeleteDialog, export: ExportDialog, backup: BackupDialog, mealSheet: MealSheetDialog, substitute: SubstituteDialog, mealSwap: MealSwapDialog };
 const THEMES = { auto: ['🌓', 'automatique'], dark: ['🌙', 'sombre'], light: ['☀️', 'clair'] };
 
 export default {
