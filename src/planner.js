@@ -618,7 +618,7 @@ export function shoppingList(ctx, days) {
         if (l.missing || !l.food) continue;
         let qty = l.qty * d.factor;
         let state = null;
-        if (l.kind === 'food' && isConvertible(l.food)) { qty = convertQty(l.food, qty, l.food.state, 'cru'); state = 'cru'; }
+        if (l.kind === 'food' && isConvertible(l.food)) { qty = convertQty(l.food, qty, l.food.state, 'cru'); state = l.food.state === 'surgelé' ? 'surgelé' : 'cru'; }
         const e = map.get(l.id) ?? { id: l.id, name: l.food.name, type: l.kind === 'internal' ? RECIPE_GROUP : l.food.type, unit: unitOf(l.food), qty: 0, state };
         e.qty += qty;
         map.set(l.id, e);
