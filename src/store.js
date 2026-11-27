@@ -8,7 +8,7 @@ import { reactive, computed, watch } from './vue.js';
 import * as C from './calc.js';
 import { EDIT_KEYS, backupFileName, emptyUser, mergeBackup, sanitizeUser, serialize, uid } from './backup.js';
 import { clampFactor, effectiveFactor, emptyDay, sanitizeDay, withGlobal, withMeal, withOwn, withoutOwn } from './day.js';
-import { carryAdjust, clampAdjust, generateWeek, realignedDayAdjust, referenceKcal, regenerateDay, removeMealAt, replacePlanMeal, restoreMealAt, sanitizePlan, setDayType, shoppingToText, viewPlan, weekTypes } from './planner.js';
+import { carryAdjust, clampAdjust, generateWeek, realignedDayAdjust, referenceKcal, regenerateDay, removeMealAt, replacePlanMeal, replacePlanMealAt, restoreMealAt, sanitizePlan, setDayType, shoppingToText, viewPlan, weekTypes } from './planner.js';
 import { findIdenticalMeal, substituteItems, variantBase } from './substitute.js';
 import { sanitizeFilters, sanitizeFoodFilters, sanitizeTab } from './prefs.js';
 import { effectiveWeek, normalizeUserWeek } from './week.js';
@@ -350,6 +350,20 @@ export function replaceInPlan(dayIndex, fromMealId, toMealId) {
   if (!state.plan || !m || m.incomplete) return false;
   const next = replacePlanMeal(state.plan, dayIndex, fromMealId, toMealId);
   return next !== state.plan && commitPlan(next, 'remplacement d\'un repas');
+}
+/**
+ * Remplace le repas n° `mealIndex` d'un jour par `toMealId`, en gardant son créneau (par rang, pas par identifiant). Les repas retirés et
+ * les ajustements sont conservés ; le facteur du jour est recalculé comme d'habitude. « Annuler » revient en arrière d'un niveau.
+ */
+export function swapPlanMeal(dayIndex, mealIndex, toMealId) {
+  const day = state.plan?.days[dayIndex];
+  const from = day?.meals[mealIndex];
+  const to = mealIdx.value.get(toMealId);
+  if (!from || !to || to.incomplete) return false;
+  const fromName = mealIdx.value.get(from[1])?.name;
+  if (!commitPlan(replacePlanMealAt(state.plan, dayIndex, mealIndex, toMealId), 'remplacement d\'un repas')) return false;
+  toast(`« ${to.name} » remplace ${fromName ? `« ${fromName} »` : 'un repas introuvable'} le ${day.label.toLowerCase()}.`);
+  return true;
 }
 /** Retire un repas d'un jour (n° `mealIndex` parmi ses repas) : il reste compté pour le facteur et le budget du jour, mais plus dans les apports. */
 export const removePlanMeal = (dayIndex, mealIndex) => !!state.plan && commitPlan(removeMealAt(state.plan, dayIndex, mealIndex), 'retrait d\'un repas');
