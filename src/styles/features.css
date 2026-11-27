@@ -50,6 +50,7 @@ button.subitem:hover { background: var(--accent-soft); }
 .plan-day .daytable th { text-align: left; }
 .plan-meta { margin: .4rem 0 0; }
 .plan-day .daytable td.plan-x { width: 1%; text-align: right; }
+.plan-day .daytable td.plan-x .icon { padding-inline: .4rem; }
 .plan-removed { list-style: none; margin: .4rem 0 0; padding: 0; display: grid; gap: .3rem; font-size: .92rem; }
 .plan-adjust { margin: .6rem 0; }
 .plan-warn { list-style: none; margin: .4rem 0; padding: 0; display: grid; gap: .3rem; }
@@ -59,3 +60,10 @@ button.subitem:hover { background: var(--accent-soft); }
 .shoplist { list-style: none; margin: 0; padding: 0; columns: 2 15rem; column-gap: 1.5rem; }
 .shoplist li { break-inside: avoid; padding: .12rem 0; }
 .shoplist .q { display: inline-block; min-width: 4.8rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* --- remplacement d'un repas (fenêtre « Remplacer un repas ») */
+.swap-current { margin: 0; padding: .45rem .7rem; border-radius: 8px; background: var(--surface2); }
+.swap-current .macros { margin-top: .2rem; }
+.swap-flags { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .15rem; }
+.swap-flags .badge { margin-left: 0; }
+.swap-delta { color: var(--text); }
