@@ -11,6 +11,20 @@ const codes = (issues) => issues.map((i) => i.code);
 const idsOf = (list) => list.map((m) => m.id);
 const slotIndex = (plan, di, slot) => plan.days[di].meals.findIndex(([s]) => s === slot);
 
+// Semaine contenant un repas d'abats un jour ouvert autre que le mardi (jour 1). Le tirage dépend des données : on cherche la première graine
+// (à partir de SEED) qui convient, au lieu de supposer que SEED en produit une. Renvoie { plan, day, index, id } du repas d'abats.
+function weekWithOffal(w, ctx) {
+  for (let seed = SEED; seed < SEED + 300; seed++) {
+    const plan = P.generateWeek(ctx, { seed });
+    for (let day = 0; day < plan.days.length; day++) {
+      if (day === 1 || P.isFixedType(w.config, plan.days[day].dayType)) continue;
+      const index = plan.days[day].meals.findIndex(([, id]) => P.isOffal(ctx.mealIdx.get(id), w.config));
+      if (index >= 0) return { plan, day, index, id: plan.days[day].meals[index][1] };
+    }
+  }
+  throw new Error('aucune semaine avec un repas d\'abats sur 300 graines');
+}
+
 // ------------------------------------------------------------------ replacePlanMealAt
 test('replacePlanMealAt : garde le créneau, ne touche ni aux autres jours, ni aux repas retirés, ni aux ajustements, ni à l\'original', async () => {
   const w = await world();
@@ -71,16 +85,14 @@ test('swapCandidates : jamais de lait + cacao un jour sans sortie moyenne ou lon
 test('swapCandidates : jamais un second repas d\'abats ; le repas remplacé n\'est pas compté dans le quota', async () => {
   const w = await world();
   const ctx = plannerCtx(w);
-  const plan = P.generateWeek(ctx, { seed: SEED });
   const offal = (m) => P.isOffal(m, w.config);
-  const at = plan.days[0].meals.findIndex(([, id]) => offal(ctx.mealIdx.get(id)));
-  assert.ok(at >= 0, 'le lundi contient le repas d\'abats de la semaine');
+  const { plan, day: offalDay, index: at } = weekWithOffal(w, ctx);
   // un autre dîner de la semaine : le quota est atteint, aucun repas d'abats (alors que leurs contextes conviendraient)
   const din = slotIndex(plan, 1, 'Dîner');
   assert.ok(w.meals.some((m) => offal(m) && m.contexts.some((c) => P.contextsFor(w.config, P.dayTypeOf(w.config, plan.days[1].dayType)).includes(c))));
   assert.deepEqual(P.swapCandidates(ctx, plan, 1, din).filter(offal), []);
   // le repas d'abats lui-même : on peut le remplacer par un autre repas d'abats (le sien ne compte pas)
-  assert.ok(P.swapCandidates(ctx, plan, 0, at).some(offal));
+  assert.ok(P.swapCandidates(ctx, plan, offalDay, at).some(offal));
   // jamais deux repas d'abats dans la semaine après un remplacement proposé
   for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
     const p = P.generateWeek(ctx, { seed });
@@ -152,12 +164,10 @@ test('swapCandidates : ne modifie ni le planning ni le contexte', async () => {
 test('swapIssues : les bonnes pastilles (déjà dans la semaine, autre catégorie, contexte, lait + cacao, abats)', async () => {
   const w = await world();
   const ctx = plannerCtx(w);
-  const plan = P.generateWeek(ctx, { seed: SEED });
-  const lundiDinner = slotIndex(plan, 0, 'Dîner');
+  const { plan, id: rognons } = weekWithOffal(w, ctx);
   const mardiDinner = slotIndex(plan, 1, 'Dîner');
   const meal = (id) => ctx.mealIdx.get(id);
-  const rognons = plan.days[0].meals[lundiDinner][1];
-  // le dîner d'abats du lundi proposé le mardi : déjà dans la semaine et second repas d'abats
+  // le repas d'abats de la semaine (un autre jour que le mardi) proposé le mardi : déjà dans la semaine et second repas d'abats
   assert.deepEqual(P.swapIssues(ctx, plan, 1, mardiDinner, meal(rognons)), [
     { code: 'used', label: 'déjà dans la semaine', level: 'info' }, // information : pas une règle
     { code: 'offal', label: '2e repas d\'abats', level: 'warn' },
