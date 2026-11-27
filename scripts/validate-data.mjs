@@ -222,6 +222,18 @@ export function validateData({ foods, internal, meals, days, config }) {
       }
       if (!isNum(adj.step) || adj.step <= 0 || adj.step > 0.5) err('config.planner.adjust.step : entre 0 (exclu) et 0,5 attendu');
     }
+    // remplacement d'un repas (fenêtre ⇄ du planificateur) : nombre de suggestions, de résultats de recherche et poids de la distance
+    const sw = pl.swap;
+    if (!isObj(sw)) err('config.planner.swap : bloc { limit, searchLimit, weights } manquant');
+    else {
+      for (const k of ['limit', 'searchLimit']) if (!Number.isInteger(sw[k]) || sw[k] < 1) err(`config.planner.swap.${k} : entier ≥ 1 attendu`);
+      const wts = sw.weights;
+      if (!isObj(wts)) err('config.planner.swap.weights : { kcal, protein, carbs } attendu');
+      else {
+        for (const k of ['kcal', 'protein', 'carbs']) if (!isNum(wts[k]) || wts[k] < 0) err(`config.planner.swap.weights.${k} : nombre positif ou nul attendu`);
+        if (['kcal', 'protein', 'carbs'].every((k) => !(wts[k] > 0))) err('config.planner.swap.weights : au moins un poids doit être strictement positif');
+      }
+    }
     for (const k of ['gapWarning', 'balanceTolerance']) if (!isNum(pl[k]) || pl[k] <= 0) err(`config.planner.${k} : nombre positif attendu`);
     for (const k of ['protein', 'fiber']) if (!isNum(pl.score?.[k]) || pl.score[k] < 0) err(`config.planner.score.${k} : nombre positif ou nul attendu`);
   }
