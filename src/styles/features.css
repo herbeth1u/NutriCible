@@ -7,7 +7,7 @@
 .notice.info { background: var(--info-bg); color: var(--info-ink); border-color: var(--info); }
 .badge.info { background: var(--info-bg); color: var(--info-ink); border-color: var(--info); }
 
-/* --- curseur global de portions (Ma journée, journées types) */
+/* --- curseur global de portions (Ma journée, planificateur) */
 .globalfactor { display: flex; flex-wrap: wrap; gap: .3rem .7rem; align-items: center; padding: .5rem .7rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface2); margin: .5rem 0; }
 .globalfactor label { display: grid; gap: .15rem; flex: 1 1 11rem; font-size: .9rem; }
 .globalfactor b { color: var(--accent); }

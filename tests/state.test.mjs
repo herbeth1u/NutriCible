@@ -93,5 +93,7 @@ test('filtres des aliments et onglet actif : relecture sûre', async () => {
   assert.equal(sanitizeFoodFilters({ sort: 'x', usage: 'y' }, config).sort, 'name');
   for (const t of TAB_IDS) assert.equal(sanitizeTab(t), t);
   assert.equal(sanitizeTab('inconnu'), 'meals');
+  assert.equal(sanitizeTab('days'), 'meals'); // onglet « Journées types » supprimé : un onglet enregistré par une ancienne version retombe sur Repas
+  assert.ok(!TAB_IDS.includes('days'));
   assert.equal(sanitizeTab(undefined), 'meals');
 });

@@ -2,7 +2,6 @@
 import { computed } from '../vue.js';
 import * as S from '../store.js';
 import MealsTab from './MealsTab.js';
-import DaysTab from './DaysTab.js';
 import PlannerTab from './PlannerTab.js';
 import TargetsTab from './TargetsTab.js';
 import SubstitutionsTab from './SubstitutionsTab.js';
@@ -18,13 +17,13 @@ import MealSheetDialog from './MealSheetDialog.js';
 import SubstituteDialog from './SubstituteDialog.js';
 import MealSwapDialog from './MealSwapDialog.js';
 
-const TABS = [['meals', 'Repas'], ['days', 'Journées types'], ['planner', 'Planificateur'], ['targets', 'Cibles et hypothèses'], ['subs', 'Substitutions et ajustements'], ['foods', 'Aliments']];
-const VIEWS = { meals: 'meals-tab', days: 'days-tab', planner: 'planner-tab', targets: 'targets-tab', subs: 'substitutions-tab', foods: 'foods-tab' };
+const TABS = [['meals', 'Repas'], ['planner', 'Planificateur'], ['targets', 'Cibles et hypothèses'], ['subs', 'Substitutions et ajustements'], ['foods', 'Aliments']];
+const VIEWS = { meals: 'meals-tab', planner: 'planner-tab', targets: 'targets-tab', subs: 'substitutions-tab', foods: 'foods-tab' };
 const DIALOGS = { profile: ProfileDialog, meal: MealFormDialog, food: FoodFormDialog, foodDelete: FoodDeleteDialog, export: ExportDialog, backup: BackupDialog, mealSheet: MealSheetDialog, substitute: SubstituteDialog, mealSwap: MealSwapDialog };
 const THEMES = { auto: ['🌓', 'automatique'], dark: ['🌙', 'sombre'], light: ['☀️', 'clair'] };
 
 export default {
-  components: { MealsTab, DaysTab, PlannerTab, TargetsTab, SubstitutionsTab, FoodsTab, MyDayPanel },
+  components: { MealsTab, PlannerTab, TargetsTab, SubstitutionsTab, FoodsTab, MyDayPanel },
   setup() {
     // Pile de boîtes de dialogue : la dernière est au premier plan, les précédentes restent montées dessous.
     const dialogs = computed(() => S.state.ui.dialogs.map((d) => ({ id: d.id, comp: DIALOGS[d.name], props: d.props })));
