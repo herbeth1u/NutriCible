@@ -106,11 +106,45 @@ test('cru/cuit : « surgelé » est le côté cru (aliment ⇄ dont l\'état de 
   assert.equal(C.stateLabel(m, 'cru'), 'surgelé');
   assert.equal(C.stateLabel(m, 'cuit'), 'cuit');
   assert.equal(C.stateLabel(w.foodIdx.get('pomme'), 'cru'), 'cru');
-  // les fruits surgelés existants (non ⇄) ne sont pas touchés
-  assert.equal(w.foodIdx.get('fraises-surgelees').convertible, false);
   assert.equal(C.isConvertible({ state: 'surgelé', coef: 0.8 }), true);
   assert.equal(C.isConvertible({ state: 'surgelé' }), false);
   assert.equal(C.isConvertible({ state: 'égoutté', coef: 0.8 }), false);
+});
+
+test('cru/cuit : fruits existants ⇄ (banane, fruits rouges et fraises surgelés), valeurs pour 100 g inchangées', async () => {
+  const w = await world();
+  // valeurs d'origine (avant l'ajout de coef et weigh) : elles ne doivent jamais bouger
+  const ref = {
+    banane: { state: 'cru', per100: { kcal: 94, protein: 1, carbs: 20.5, fat: 0.2, fiber: 2.1 } },
+    'fruits-rouges-surgeles': { state: 'surgelé', per100: { kcal: 42, protein: 1, carbs: 6.4, fat: 0.49, fiber: 3.1 } },
+    'fraises-surgelees': { state: 'surgelé', per100: { kcal: 39, protein: 0.6, carbs: 6, fat: 0.25, fiber: 3.8 } },
+  };
+  for (const [id, r] of Object.entries(ref)) {
+    const f = w.foodIdx.get(id);
+    assert.ok(f.convertible, `${id} ⇄`);
+    assert.equal(f.state, r.state, `${id} : état de référence inchangé`);
+    assert.equal(C.weighState(f), 'cru', `${id} : pesé avant cuisson`);
+    assert.ok(f.coef > 0 && f.coef < 1, `${id} : coef de cuisson < 1`);
+    assert.deepEqual(f.per100, r.per100, `${id} : per100 inchangé`);
+    // surgelé/cru → cuit : le poids baisse, la portion garde les mêmes macros
+    const cuit = C.per100In(f, 'cuit');
+    near(assert, cuit.kcal, r.per100.kcal / f.coef);
+    near(assert, C.convertQty(f, 100, f.state, 'cuit'), 100 * f.coef);
+  }
+  assert.equal(C.stateLabel(w.foodIdx.get('fraises-surgelees'), 'cru'), 'surgelé');
+  assert.equal(C.stateLabel(w.foodIdx.get('banane'), 'cru'), 'cru');
+  // les fruits jugés non cuisables restent à un seul état
+  for (const id of ['kiwi', 'dattes', 'clementine', 'melon', 'litchis-frais', 'litchis-conserve', 'pamplemousse', 'pruneaux', 'baies-goji']) {
+    assert.equal(w.foodIdx.get(id).convertible, false, `${id} non ⇄`);
+  }
+  // une modification utilisateur des valeurs garde coef, pesée et état (la fusion n'efface pas les nouveaux champs)
+  const e = await world({ edits: { banane: { per100: { kcal: 90, protein: 1, carbs: 19.5, fat: 0.2, fiber: 2.1 } }, 'fraises-surgelees': { note: 'ma note' } } });
+  const b = e.foodIdx.get('banane');
+  assert.equal(b.per100.kcal, 90);
+  assert.ok(b.convertible && b.coef === 0.85 && b.weigh === 'cru' && b.state === 'cru');
+  const fr = e.foodIdx.get('fraises-surgelees');
+  assert.ok(fr.convertible && fr.coef === 0.8 && fr.weigh === 'cru' && fr.state === 'surgelé');
+  assert.equal(fr.note, 'ma note');
 });
 
 test('cru/cuit : une modification utilisateur des valeurs garde coef, pesée et état surgelé', async () => {
