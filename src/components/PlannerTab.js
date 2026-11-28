@@ -6,11 +6,12 @@ import { computed } from '../vue.js';
 import * as C from '../calc.js';
 import * as S from '../store.js';
 import Bar from './Bar.js';
+import TweakMark from './TweakMark.js';
 
 const STATUS = { maintien: 'maintien du poids', surplus: 'surplus', déficit: 'déficit' };
 
 export default {
-  components: { Bar },
+  components: { Bar, TweakMark },
   setup() {
     const view = S.planView;
     const dayTypes = S.config.value.dayTypes;
@@ -27,7 +28,7 @@ export default {
     const warnings = (label, level = 'warn') => view.value.warnings.filter((w) => w.day === label && w.level === level);
     // Écart signé, arrondi à l'unité comme tout l'affichage : jamais « -0 » ni « +0 ».
     const sign = C.fmtSigned;
-    const sheet = (d, it) => S.openMealSheet(it.id, null, { portion: d.factor, replaceWhere: { where: 'plan', day: d.index, mealId: it.id } });
+    const sheet = (d, it) => S.openMealSheet(it.id, null, { portion: d.factor, replaceWhere: { where: 'plan', day: d.index, mealId: it.id }, planDay: d.index, slot: it.slot });
     const toMyDay = (d) => {
       if (S.state.day.items.length && !window.confirm('Remplacer le contenu de « Ma journée » par ce jour du planning ?')) return;
       if (S.addPlanDayToMyDay(d.index)) S.toast(`${d.label} ajouté à Ma journée.`);
@@ -45,7 +46,7 @@ export default {
   template: `
     <section aria-labelledby="t-planner">
       <h2 id="t-planner">Planificateur de semaine</h2>
-      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée (la semaine type se règle dans l'onglet Cibles et hypothèses). Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses au moins {{ minLegume }} fois dans la semaine, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue ; un repas peut revenir jusqu'à {{ maxPerMeal }} fois dans la semaine (jamais deux fois le même jour), avec au moins {{ distinctPct }} % de repas distincts. Les curseurs d'ajustement (semaine, jour) multiplient les portions calculées ; ⇄ remplace un repas par un autre repas proche (les portions du jour sont recalculées) ; ✕ retire un repas sans recalculer les autres portions : le total du jour baisse, et « Rétablir » le remet.</p>
+      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée (la semaine type se règle dans l'onglet Cibles et hypothèses). Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses au moins {{ minLegume }} fois dans la semaine, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue ; un repas peut revenir jusqu'à {{ maxPerMeal }} fois dans la semaine (jamais deux fois le même jour), avec au moins {{ distinctPct }} % de repas distincts. Les curseurs d'ajustement (semaine, jour) multiplient les portions calculées ; le Planificateur peut ajuster de quelques dizaines de grammes la quantité de quelques aliments pour mieux approcher vos cibles ; une pastille bleue signale un ajustement léger, une pastille jaune un ajustement important ; ⇄ remplace un repas par un autre repas proche (les portions du jour sont recalculées) ; ✕ retire un repas sans recalculer les autres portions : le total du jour baisse, et « Rétablir » le remet.</p>
       <p v-if="!status.complete" class="notice">Renseigne <button type="button" class="linklike" @click="profile">Mon profil</button> pour obtenir les budgets et les facteurs de portion (il manque : {{ status.missing.join(', ') }}). Sans profil, les repas sont tirés près d'une journée type, avec des portions ×1 et sans écart à la cible.</p>
 
       <div class="plan-actions">
@@ -92,7 +93,7 @@ export default {
             <tbody>
               <tr v-for="(it, i) in d.items" :key="it.slot + it.id + '-' + i">
                 <template v-if="it.meal">
-                  <th scope="row"><button type="button" class="linklike dayrow-name" :title="'Ouvrir la fiche de ' + it.meal.name" @click="sheet(d, it)">{{ it.meal.name }}</button></th>
+                  <th scope="row"><span class="plan-meal"><button type="button" class="linklike dayrow-name" :title="'Ouvrir la fiche de ' + it.meal.name" @click="sheet(d, it)">{{ it.meal.name }}</button><tweak-mark v-if="it.tweaks" :meal="it.meal" :factor="d.factor" @open="sheet(d, it)" /></span></th>
                   <td class="muted">{{ it.slot }}</td>
                   <td>{{ kcal(it.meal.totals.kcal * d.factor) }} kcal</td>
                   <td class="plan-x">
