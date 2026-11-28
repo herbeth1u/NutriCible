@@ -13,7 +13,9 @@ export const APP = 'NutriCible';
 // Format 2 : la sauvegarde contient aussi « Ma journée » (`day`) et le planning de la semaine (`plan`).
 // `day` et `plan` valent null quand la sauvegarde n'en contient pas (fichier de format 1, ou pas de planning généré) : rien à restaurer.
 // Format 3 : et la semaine type choisie dans « Cibles et hypothèses » (`week` : 7 identifiants de journées types, ou null = semaine d'origine de data/days.json).
-export const FORMAT = 3;
+// Format 4 : retouches de quantités (`plan.days[].tweaks` et `day.items[].tweaks`), absentes des fichiers de format 3 : aucune retouche.
+// Un fichier de format 4 ouvert par une version plus ancienne est refusé (« version plus récente ») au lieu d'être lu en perdant les retouches.
+export const FORMAT = 4;
 
 export const emptyUser = () => ({ profile: emptyProfile(), meals: [], foods: [], foodEdits: {}, deletedFoods: [], replacements: {}, day: null, plan: null, week: null });
 
@@ -98,6 +100,7 @@ export const MIGRATIONS = {
   0: (d) => ({ ...d, replacements: d?.replacements ?? {} }),
   1: (d) => ({ ...d, day: d?.day ?? null, plan: d?.plan ?? null }), // « Ma journée » et planning : absents des sauvegardes de format 1
   2: (d) => ({ ...d, week: d?.week ?? null }), // semaine type personnalisée : absente des sauvegardes de format 2 (semaine d'origine)
+  3: (d) => d, // format 4 : retouches de quantités, plan.days[].tweaks et day.items[].tweaks, absentes des fichiers de format 3 : aucune retouche
 };
 
 export function migrate(file) {
@@ -167,11 +170,18 @@ export function mergeBackup(current, incoming, strategy = 'keep', reserved = {})
 
   // « Ma journée » et planning : suivent les repas renommés ; une sauvegarde qui n'en contient pas (null) ne remplace rien ;
   // en mode « garder l'existant », l'importé ne prend la place que d'une journée vide ou d'une absence de planning.
-  if (incoming.day && (strategy !== 'keep' || !user.day?.items.length)) user.day = { ...incoming.day, items: incoming.day.items.map((it) => ({ ...it, meal: remap(it.meal) })) };
+  // Les retouches de quantités suivent aussi les renommages (repas et aliments) ; la clé reste absente quand il n'y en avait pas. En mode
+  // « garder l'existant », un repas importé peut être rabattu sur un repas de recette différente : la garde foodId de la lecture ignore alors
+  // les retouches qui ne correspondent plus.
+  const remapDayTweaks = (list) => list.map(([line, foodId, grams]) => [line, remap(foodId), grams]);
+  if (incoming.day && (strategy !== 'keep' || !user.day?.items.length)) {
+    user.day = { ...incoming.day, items: incoming.day.items.map((it) => ({ ...it, meal: remap(it.meal), ...(it.tweaks ? { tweaks: remapDayTweaks(it.tweaks) } : {}) })) };
+  }
   // Les repas retirés (`removed`) suivent les repas renommés comme les repas du planning (`meals`).
   if (incoming.plan && (strategy !== 'keep' || !user.plan)) {
     const remapPairs = (list) => (list ?? []).map(([slot, id]) => [slot, remap(id)]);
-    user.plan = { ...incoming.plan, days: incoming.plan.days.map((d) => ({ ...d, meals: remapPairs(d.meals), removed: remapPairs(d.removed) })) };
+    const remapPlanTweaks = (list) => list.map(([slot, id, line, foodId, grams]) => [slot, remap(id), line, remap(foodId), grams]);
+    user.plan = { ...incoming.plan, days: incoming.plan.days.map((d) => ({ ...d, meals: remapPairs(d.meals), removed: remapPairs(d.removed), ...(d.tweaks ? { tweaks: remapPlanTweaks(d.tweaks) } : {}) })) };
   }
 
   // Semaine type : l'importée l'emporte quand elle est personnalisée ; en mode « garder l'existant », seulement si l'existante est celle d'origine.
