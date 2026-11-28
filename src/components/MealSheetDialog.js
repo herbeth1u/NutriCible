@@ -15,10 +15,14 @@ export default {
     // Fiche ouverte hors de « Ma journée » (planificateur) : portion affichée, et où mettre une variante (voir store.applyReplace).
     portion: { type: Number, default: null },
     replaceWhere: { type: Object, default: null },
+    planDay: { type: Number, default: null }, // jour du planning d'où vient la fiche (repas retouché du jour) et créneau du repas
+    slot: { type: String, default: null },
   },
   emits: ['close'],
   setup(props, { emit }) {
-    const meal = computed(() => S.mealIdx.value.get(props.mealId) ?? null);
+    // Le repas affiché : retouché quand la fiche vient d'une ligne de « Ma journée » ou du planning (la recette de base reste inchangée).
+    const planMeal = computed(() => (props.planDay === null ? null : S.planView.value?.days[props.planDay]?.items.find((it) => it.id === props.mealId && it.slot === props.slot)?.meal ?? null));
+    const meal = computed(() => (row.value ? row.value.meal : planMeal.value ?? S.mealIdx.value.get(props.mealId) ?? null));
     const row = computed(() => (props.dayIndex === null ? null : S.dayRows.value.find((r) => r.index === props.dayIndex && r.meal.id === props.mealId) ?? null));
     const factor = computed(() => row.value?.factor ?? props.portion ?? 1);
     const replace = computed(() => (row.value ? { where: 'day', index: row.value.index, mealId: props.mealId } : props.replaceWhere));
