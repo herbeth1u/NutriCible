@@ -480,7 +480,7 @@ test('journées types : totaux, repas incomplets ignorés, bilan hebdomadaire', 
 test('textes à copier : repas et journée', async () => {
   const w = await world();
   const txt = C.mealToText(w.mealIdx.get('din-poulet-courgette-champignons'));
-  assert.match(txt, /^Poulet poêlu courgette champignons et riz complet \(Dîner\) : \d+ kcal/);
+  assert.match(txt, /^Poulet poêlé courgette champignons et riz complet \(Dîner\) : \d+ kcal/);
   assert.match(txt, /- 180 g Filet de poulet entier \(cru\)/);
   assert.match(txt, /Préparation :/);
   assert.match(txt, /\* valeur estimée/);
