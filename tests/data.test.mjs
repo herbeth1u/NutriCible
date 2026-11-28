@@ -194,3 +194,48 @@ test('règle : repas au blender (tag « Blender », mixage dans la préparation,
   // le déjeuner reste une salade froide : aucune recette au blender à ce créneau
   assert.ok(!blender.some((m) => m.category === 'Déjeuner'));
 });
+
+test('validation : bloc planner.tune (obligatoire, bornes, seuils, types, poids, plafond)', async () => {
+  const w = await world();
+  const base = () => ({ foods: clone(w.foods), internal: { schemaVersion: 1, ingredients: clone(w.internal) }, meals: { schemaVersion: 1, meals: w.meals.map((m) => clone(m.def)) }, days: clone(w.days), config: clone(w.config) });
+  const errorsOf = (mut) => { const d = base(); mut(d.config.planner.tune); return validateData(d).errors.filter((e) => e.includes('planner.tune')); };
+  const bad = (mut, re) => assert.ok(errorsOf(mut).some((e) => re.test(e)), `${re} : ${JSON.stringify(errorsOf(mut))}`);
+  assert.deepEqual(errorsOf(() => {}), []);
+  const absent = base(); delete absent.config.planner.tune;
+  assert.ok(validateData(absent).errors.some((e) => /planner\.tune : bloc .* manquant/.test(e)), 'bloc absent');
+  bad((t) => { t.enabled = 'oui'; }, /enabled : booléen/);
+  bad((t) => { t.maxTweaks = 6; }, /maxTweaks : entier entre 1 et 5/);
+  bad((t) => { t.maxTweaks = 0; }, /maxTweaks/);
+  bad((t) => { t.maxIterations = 0; }, /maxIterations/);
+  bad((t) => { t.bounds.min = 1.2; }, /bounds/);
+  bad((t) => { t.bounds.max = 0.9; }, /bounds/);
+  bad((t) => { t.major.min = 0.4; }, /major/);
+  bad((t) => { t.major.max = 2.5; }, /major/);
+  bad((t) => { t.major.min = 1.1; }, /major/);
+  bad((t) => { t.types['Légumes'].max = 2.5; }, /types\.Légumes/);
+  bad((t) => { t.types['Légumes'].min = 0.3; }, /types\.Légumes/);
+  bad((t) => { t.types['Légumes'].step = 0; }, /types\.Légumes\.step/);
+  bad((t) => { t.types['Légumes'].step = -5; }, /step/);
+  bad((t) => { t.types['Gâteaux'] = { min: 0.8, max: 1.2, step: 10 }; }, /type d'aliment « Gâteaux » inconnu/);
+  bad((t) => { t.types = {}; }, /types : au moins un type/);
+  bad((t) => { t.excludeCategories = ['Brunch']; }, /catégorie « Brunch » inconnue/);
+  bad((t) => { t.excludeCategories = 'Repas plaisir'; }, /excludeCategories/);
+  bad((t) => { t.weights.kcal = -1; }, /weights\.kcal/);
+  bad((t) => { t.weights.protein = 0; }, /weights\.protein : nombre strictement positif/);
+  bad((t) => { delete t.weights.reg; }, /weights\.reg/);
+  bad((t) => { delete t.weights; }, /weights/);
+  // règle morte : avertissement, pas erreur
+  const dead = base();
+  dead.config.foodTypes.push('Gâteaux');
+  dead.config.planner.tune.types['Gâteaux'] = { min: 0.8, max: 1.2, step: 10 };
+  const r = validateData(dead);
+  assert.ok(!r.errors.some((e) => e.includes('Gâteaux')));
+  assert.ok(r.warnings.some((e) => e.includes('Gâteaux') && e.includes('planner.tune')));
+});
+
+test('validation : chaque type de planner.tune.types est porté par un aliment d\'un repas du recueil (données réelles)', async () => {
+  const w = await world();
+  const { warnings } = validateData({ foods: w.foods, internal: { schemaVersion: 1, ingredients: w.internal }, meals: { schemaVersion: 1, meals: w.meals.map((m) => m.def) }, days: w.days, config: w.config });
+  assert.deepEqual(warnings.filter((e) => e.includes('planner.tune')), []);
+  assert.deepEqual(Object.keys(w.config.planner.tune.types).filter((t) => !w.config.foodTypes.includes(t)), []);
+});

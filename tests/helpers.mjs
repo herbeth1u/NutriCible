@@ -25,3 +25,9 @@ export async function world(overrides = {}) {
 export function plannerCtx(w, profile = FICTIVE, { meals = w.meals } = {}) {
   return { meals, mealIdx: new Map(meals.map((m) => [m.id, m])), config: w.config, targets: profile ? allTargets(profile, w.config) : null, week: weekTypes(w.days.week, w.days.days), reference: referenceKcal(w.days.days, w.mealIdx) };
 }
+
+/** Même contexte, retouche des quantités active (`true`) ou désactivée (`false`, comportement d'avant le lot) ; `null` retire le bloc `planner.tune`. */
+export function tuneCtx(ctx, enabled = true) {
+  const { tune, ...planner } = ctx.config.planner;
+  return { ...ctx, config: { ...ctx.config, planner: enabled === null ? planner : { ...planner, tune: { ...tune, enabled } } } };
+}
