@@ -480,11 +480,69 @@ test('journées types : totaux, repas incomplets ignorés, bilan hebdomadaire', 
 test('textes à copier : repas et journée', async () => {
   const w = await world();
   const txt = C.mealToText(w.mealIdx.get('din-poulet-courgette-champignons'));
-  assert.match(txt, /^Poulet poêlé courgette champignons et riz complet \(Dîner\) : \d+ kcal/);
+  assert.match(txt, /^Poulet poêlu courgette champignons et riz complet \(Dîner\) : \d+ kcal/);
   assert.match(txt, /- 180 g Filet de poulet entier \(cru\)/);
   assert.match(txt, /Préparation :/);
   assert.match(txt, /\* valeur estimée/);
   const m = w.mealIdx.get('col-dattes-amandes');
   const day = C.dayToText('Jour de repos', [{ meal: m, factor: 1.25 }], m.totals, null);
   assert.match(day, /×1,25/);
+});
+
+// ------------------------------------------------------------------ retouche des quantités : withQuantities, dayTotals avec resolved
+const sameMacros = (a, b) => { for (const k of C.MACRO_KEYS) near(assert, a[k], b[k], 1e-9); };
+
+test('withQuantities : sans retouche applicable, le repas est rendu tel quel', async () => {
+  const w = await world();
+  const m = w.meals.find((x) => !x.cheat && x.lines.some((l) => l.kind === 'food'));
+  assert.equal(C.withQuantities(m, new Map()), m);
+  assert.equal(C.withQuantities(m, {}), m);
+  const i = m.lines.findIndex((l) => l.kind === 'food');
+  assert.equal(C.withQuantities(m, new Map([[i, m.lines[i].qty]])), m, 'quantité identique : pas de retouche');
+  assert.equal(C.withQuantities(m, new Map([[99, 50]])), m, 'ligne absente');
+  assert.equal(C.withQuantities(m, new Map([[i, -5]])), m, 'quantité négative');
+});
+
+test('withQuantities : lignes et totaux égaux à resolveMeal sur une définition aux mêmes quantités ; le caractère du repas ne change pas', async () => {
+  const w = await world();
+  for (const m of w.meals.filter((x) => !x.cheat && x.lines.some((l) => l.kind === 'food')).slice(0, 40)) {
+    const foodLines = m.lines.map((l, i) => [l, i]).filter(([l]) => l.kind === 'food');
+    const q = new Map(foodLines.slice(0, 2).map(([l, i]) => [i, Math.round(l.qty * 1.37 * 100) / 100]));
+    const t = C.withQuantities(m, q);
+    const items = m.def.items.map(([id, g], i) => [id, q.has(i) ? q.get(i) : g]); // lines[i] = def.items[i] pour les aliments de tête de liste
+    const ref = C.resolveMeal({ ...m.def, items }, w.ctx);
+    assert.equal(t.lines.length, ref.lines.length);
+    t.lines.forEach((l, i) => { near(assert, l.qty, ref.lines[i].qty, 1e-9); sameMacros(l.macros, ref.lines[i].macros); });
+    sameMacros(t.totals, ref.totals);
+    assert.equal(t.tuned, true);
+    assert.deepEqual(t.tweaks.map((x) => x.line), [...q.keys()].sort((a, b) => a - b));
+    for (const x of t.tweaks) assert.deepEqual([x.foodId, x.base, x.qty], [m.lines[x.line].id, m.lines[x.line].qty, q.get(x.line)]);
+    for (const k of ['id', 'name', 'category', 'tags', 'density', 'seasons', 'contexts', 'def']) assert.deepEqual(t[k], m[k], k);
+    assert.equal(m.tuned, undefined, 'le repas d\'origine n\'est pas modifié');
+  }
+});
+
+test('withQuantities : jamais sur une ligne interne, un cheat meal ou un aliment introuvable', async () => {
+  const w = await world();
+  const internal = w.meals.find((x) => x.lines.some((l) => l.kind === 'internal'));
+  const i = internal.lines.findIndex((l) => l.kind === 'internal');
+  assert.equal(C.withQuantities(internal, new Map([[i, 500]])), internal);
+  const cheat = w.meals.find((x) => x.cheat);
+  assert.equal(C.withQuantities(cheat, new Map([[0, 500]])), cheat);
+});
+
+test('dayTotals : resolved passe avant l\'index, sans resolved le résultat est inchangé ; fmtPct', async () => {
+  const w = await world();
+  const m = w.meals.find((x) => !x.cheat && x.lines.some((l) => l.kind === 'food'));
+  const t = C.withQuantities(m, new Map([[m.lines.findIndex((l) => l.kind === 'food'), m.lines.find((l) => l.kind === 'food').qty * 2]]));
+  const plain = C.dayTotals([{ meal: m.id, factor: 1.5 }], w.mealIdx);
+  const tuned = C.dayTotals([{ meal: m.id, factor: 1.5, resolved: t }], w.mealIdx);
+  sameMacros(plain.totals, C.scale(m.totals, 1.5));
+  sameMacros(tuned.totals, C.scale(t.totals, 1.5));
+  assert.ok(tuned.totals.kcal > plain.totals.kcal);
+  assert.deepEqual(C.dayTotals([{ meal: 'inconnu', factor: 1, resolved: m }], new Map()).missing, [], 'resolved suffit sans repas dans l\'index');
+  assert.equal(flat(C.fmtPct(1.4)), '+40 %');
+  assert.equal(flat(C.fmtPct(0.75)), '-25 %');
+  assert.equal(flat(C.fmtPct(1)), '0 %');
+  assert.ok(C.fmtPct(1.4).includes(' %'));
 });
