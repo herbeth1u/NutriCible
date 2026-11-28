@@ -32,6 +32,8 @@ export const fmtNum = (n, d = 0) => Number(n).toLocaleString('fr-FR', { minimumF
 export const fmtInt = (n) => fmtNum(roundDisplay(n));
 /** Écart signé : « +12 », « −12 », « 0 » sans signe. */
 export const fmtSigned = (n) => { const r = roundDisplay(n); return `${r > 0 ? '+' : ''}${fmtInt(r)}`; };
+/** Écart relatif signé d'un rapport : 1,4 → « +40 % » (signe « + » ou « − », espace insécable avant « % »). */
+export const fmtPct = (ratio) => `${fmtSigned((ratio - 1) * 100)} %`;
 export const fmtKcal = fmtInt;
 export const fmtG = fmtInt;
 /** Quantité : entière, sauf sous 5 g où l'on garde une décimale. */
@@ -191,6 +193,28 @@ export function resolveMeal(def, ctx) {
   };
 }
 
+/**
+ * Repas retouché : les lignes d'aliments dont l'index figure dans `qtyByLine` (Map ou objet index → grammes, avant facteur de
+ * portion) prennent la nouvelle quantité, leurs macros sont recalculées comme dans `resolveMeal` (valeurs pour 100 g de l'aliment) et
+ * `totals` est la même somme. Le reste (nom, catégorie, tags, densité, définition…) reste celui de la recette : une retouche ne
+ * change pas le caractère du repas. Le résultat porte `tuned: true` et `tweaks: [{ line, foodId, base, qty }]` (pour l'affichage).
+ * Sans aucune retouche applicable (quantité identique, ligne absente ou interne, aliment introuvable), le repas est rendu tel quel.
+ * @param {ReturnType<typeof resolveMeal>} meal @param {Map<number, number>|Record<number, number>} qtyByLine
+ */
+export function withQuantities(meal, qtyByLine) {
+  const entries = qtyByLine instanceof Map ? [...qtyByLine] : Object.entries(qtyByLine ?? {}).map(([i, q]) => [Number(i), q]);
+  const byLine = new Map(entries);
+  const tweaks = [];
+  const lines = meal.lines.map((l, i) => {
+    const q = byLine.get(i);
+    if (meal.cheat || l.kind !== 'food' || l.missing || !l.food || !(q > 0) || q === l.qty) return l;
+    tweaks.push({ line: i, foodId: l.id, base: l.qty, qty: q });
+    return { ...l, qty: q, macros: scale(l.food.per100, q / 100) };
+  });
+  if (!tweaks.length) return meal;
+  return { ...meal, lines, totals: sum(lines.map((l) => l.macros)), tuned: true, tweaks };
+}
+
 /** Impact d'une modification d'aliment : repas concernés, kcal avant → après, changements de densité. */
 export function foodImpact(foodId, before, after, defs, config, internal, repl) {
   const mk = (idx) => ({ foodIdx: idx, internalIdx: new Map(internal.map((i) => [i.id, i])), config, repl });
@@ -255,12 +279,15 @@ export function sortMeals(meals, key = 'name', dir = 1) {
 }
 
 // ---------------------------------------------------------------- journées et semaine
-/** items : [{ meal: id, factor }] → total des repas complets ; missing : repas introuvables ou incomplets. */
+/**
+ * items : [{ meal: id, factor, resolved? }] → total des repas complets ; missing : repas introuvables ou incomplets.
+ * `resolved` (facultatif) : le repas déjà résolu à utiliser, retouché par exemple (voir `withQuantities`) ; il passe avant l'index.
+ */
 export function dayTotals(items, mealIdx) {
   let totals = zero();
   const missing = [];
   for (const it of items) {
-    const m = mealIdx.get(it.meal);
+    const m = it.resolved ?? mealIdx.get(it.meal);
     if (!m || m.incomplete) { missing.push(it.meal); continue; }
     totals = add(totals, scale(m.totals, it.factor ?? 1));
   }

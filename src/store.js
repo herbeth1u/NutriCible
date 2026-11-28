@@ -7,10 +7,11 @@
 import { reactive, computed, watch } from './vue.js';
 import * as C from './calc.js';
 import { EDIT_KEYS, backupFileName, emptyUser, mergeBackup, sanitizeUser, serialize, uid } from './backup.js';
-import { clampFactor, effectiveFactor, emptyDay, sanitizeDay, withGlobal, withMeal, withOwn, withoutOwn } from './day.js';
+import { clampFactor, effectiveFactor, emptyDay, itemsFromPlanDay, sanitizeDay, withGlobal, withMeal, withOwn, withoutOwn } from './day.js';
 import { carryAdjust, clampAdjust, generateWeek, realignedDayAdjust, referenceKcal, regenerateDay, removeMealAt, replacePlanMeal, replacePlanMealAt, restoreMealAt, sanitizePlan, setDayType, shoppingToText, viewPlan, weekTypes } from './planner.js';
 import { findIdenticalMeal, substituteItems, variantBase } from './substitute.js';
 import { sanitizeFilters, sanitizeFoodFilters, sanitizeTab } from './prefs.js';
+import { tweakedMeal, tweakLimits } from './tweaks.js';
 import { effectiveWeek, normalizeUserWeek } from './week.js';
 
 export const PREFIX = 'nutricible:v1:';
@@ -32,8 +33,8 @@ export const state = reactive({
   storageOk: !!storage,
   base: { foods: [], internal: [], meals: [], days: [], week: [], config: null },
   user: emptyStored(),
-  day: emptyDay(), // « Ma journée » : { dayType, global, items: [{ meal, base, own? }] } (voir src/day.js)
-  plan: null, // planning de la semaine : { v, seed, adjust, days: [{ label, dayType, seed, adjust, meals: [[créneau, idRepas]], removed: [[créneau, idRepas]] }] } (voir src/planner.js)
+  day: emptyDay(), // « Ma journée » : { dayType, global, items: [{ meal, base, own?, tweaks? }] } (voir src/day.js)
+  plan: null, // planning de la semaine : { v, seed, adjust, days: [{ label, dayType, seed, adjust, meals: [[créneau, idRepas]], removed: [[créneau, idRepas]], tweaks? }] } (voir src/planner.js)
   planUndo: null, // un niveau d'annulation, en mémoire seulement : { plan, label }
   theme: 'auto',
   ui: { tab: 'meals', dialogs: [], dayOpen: false, filters: C.defaultFilters(), foodFilters: { q: '', types: [], seasons: [], origins: [], usage: '', sort: 'name', dir: 1 }, toast: '' },
@@ -65,8 +66,16 @@ export const usage = computed(() => {
 export const deletedFoods = computed(() => state.base.foods.filter((f) => state.user.deletedFoods.includes(f.id)));
 export const profileStatus = computed(() => C.profileStatus(state.user.profile));
 export const targets = computed(() => (profileStatus.value.complete && config.value ? C.allTargets(state.user.profile, config.value) : null));
-export const dayRows = computed(() => state.day.items.map((it, index) => ({ ...it, index, factor: effectiveFactor(it, state.day.global), own: Number.isFinite(it.own), meal: mealIdx.value.get(it.meal) })).filter((r) => r.meal));
-export const dayTotals = computed(() => C.dayTotals(state.day.items.map((it) => ({ meal: it.meal, factor: effectiveFactor(it, state.day.global) })), mealIdx.value).totals);
+/** Repas d'une ligne de « Ma journée » : la recette, retouchée par les `tweaks` de la ligne (seules les retouches valides à la lecture s'appliquent). */
+const dayMeal = (it) => {
+  const m = mealIdx.value.get(it.meal);
+  return m && it.tweaks ? tweakedMeal(m, it.tweaks, tweakLimits(config.value)) : m;
+};
+export const dayRows = computed(() => state.day.items.map((it, index) => {
+  const meal = dayMeal(it);
+  return { ...it, index, factor: effectiveFactor(it, state.day.global), own: Number.isFinite(it.own), meal, tweaks: meal?.tweaks }; // `tweaks` : le détail à afficher (absent si non retouché)
+}).filter((r) => r.meal));
+export const dayTotals = computed(() => C.dayTotals(state.day.items.map((it) => ({ meal: it.meal, factor: effectiveFactor(it, state.day.global), resolved: dayMeal(it) })), mealIdx.value).totals);
 export const dayTarget = computed(() => targets.value?.[state.day.dayType] ?? null);
 export const foodTypes = computed(() => config.value?.foodTypes ?? []);
 /** Semaine type effective : celle d'origine (data/days.json), avec les journées types choisies dans « Cibles et hypothèses » (state.user.week). */
@@ -173,9 +182,10 @@ export const duplicateMeal = (m) => pushDialog('meal', { draft: duplicateDraft(m
 export const editMeal = (m) => pushDialog('meal', { draft: { ...duplicateDraft(m), id: m.id, name: m.name }, mode: 'edit' });
 /**
  * Fiche complète d'un repas en popup ; `dayIndex` = sa ligne dans « Ma journée » (portion, retrait, remplacement).
- * Hors « Ma journée » (planificateur) : `portion` = facteur à afficher, `replaceWhere` = où mettre une variante (voir `applyReplace`).
+ * Hors « Ma journée » (planificateur) : `portion` = facteur à afficher, `replaceWhere` = où mettre une variante (voir `applyReplace`),
+ * `planDay` et `slot` = le jour du planning et le créneau du repas (la fiche affiche alors le repas retouché de ce jour).
  */
-export const openMealSheet = (mealId, dayIndex = null, { portion = null, replaceWhere = null } = {}) => pushDialog('mealSheet', { mealId, dayIndex, portion, replaceWhere });
+export const openMealSheet = (mealId, dayIndex = null, { portion = null, replaceWhere = null, planDay = null, slot = null } = {}) => pushDialog('mealSheet', { mealId, dayIndex, portion, replaceWhere, planDay, slot });
 /**
  * Ouvre le panneau de substitution pour l'aliment n° `foodIndex` (parmi les aliments, hors ingrédients internes) d'un repas.
  * `replace` : où mettre la variante à l'enregistrement (voir `applyReplace`), ou null pour seulement l'enregistrer.
@@ -314,11 +324,14 @@ export const releaseDayFactor = (index) => { Object.assign(state.day, withoutOwn
 export const setDayGlobal = (g) => { Object.assign(state.day, withGlobal(state.day, g)); };
 export const clearDay = () => { state.day.items = []; state.day.global = 1; };
 
-/** Charge une journée type dans « Ma journée » : facteurs de la journée type en base, facteur global = `factor`. */
+/**
+ * Charge une journée dans « Ma journée » : items [idRepas, facteur de départ, retouches?], facteur global = `factor`. Un repas introuvable ou
+ * incomplet est ignoré ; les retouches [ligne, idAliment, grammes] sont recopiées dans l'item (clé absente sans retouche).
+ */
 export function loadDay(day, factor = 1) {
   state.day.dayType = day.dayType;
   state.day.global = clampFactor(factor);
-  state.day.items = day.items.filter(([id]) => mealIdx.value.get(id) && !mealIdx.value.get(id).incomplete).map(([meal, f]) => ({ meal, base: f }));
+  state.day.items = day.items.filter(([id]) => mealIdx.value.get(id) && !mealIdx.value.get(id).incomplete).map(([meal, f, tweaks]) => (tweaks?.length ? { meal, base: f, tweaks: tweaks.map((t) => [...t]) } : { meal, base: f }));
   state.ui.dayOpen = true;
 }
 
@@ -399,16 +412,16 @@ export function undoPlan() {
 /** Met un jour du planning dans « Ma journée » (type de journée, repas et facteur de portion du jour) : remplace son contenu. */
 export function addPlanDayToMyDay(index) {
   const d = planView.value?.days[index];
-  const items = d ? d.items.filter((it) => it.meal && !it.meal.incomplete).map((it) => [it.id, 1]) : [];
+  const items = d ? itemsFromPlanDay(d) : [];
   if (!items.length) return false;
-  loadDay({ dayType: d.dayType.id, items }, d.factor);
+  loadDay({ dayType: d.dayType.id, items }, d.factor); // les retouches valides du jour suivent chaque repas : mêmes totaux que le planning
   return true;
 }
 export const copyShoppingList = () => planView.value && copyWithToast(shoppingToText(planView.value.shopping), 'Liste de courses copiée.');
 
 // ------------------------------------------------------------------ sauvegarde et restauration
 const plain = (x) => JSON.parse(JSON.stringify(x));
-// Format 3 : la sauvegarde contient aussi « Ma journée », le planning et la semaine type choisie (voir src/backup.js).
+// Format 4 : la sauvegarde contient aussi « Ma journée », le planning (retouches de quantités comprises) et la semaine type choisie (voir src/backup.js).
 const snapshot = () => ({ ...plain(state.user), day: plain(state.day), plan: plain(state.plan) });
 export const exportBackup = () => downloadFile(backupFileName(), serialize(snapshot()), 'application/json');
 
@@ -420,8 +433,9 @@ export function restoreBackup(incoming, strategy) {
   state.user.week = normalizeUserWeek(state.base.week, state.user.week, state.base.days.map((d) => d.id));
   const dayTypeIds = (state.base.config?.dayTypes ?? []).map((t) => t.id);
   // null = la sauvegarde n'en contient pas (format 1, ou pas de planning) : on garde l'actuel. Objet day.js : mêmes références (Ma journée le lit).
-  if (day) Object.assign(state.day, sanitizeDay(day, dayTypeIds));
-  const restored = plan ? sanitizePlan(plan, { dayTypeIds, adjust: state.base.config?.planner?.adjust }) : null;
+  const maxTweaks = state.base.config?.planner?.tune?.maxTweaks;
+  if (day) Object.assign(state.day, sanitizeDay(day, dayTypeIds, { maxTweaks }));
+  const restored = plan ? sanitizePlan(plan, { dayTypeIds, adjust: state.base.config?.planner?.adjust, maxTweaks }) : null;
   if (restored) { state.plan = restored; state.planUndo = null; }
   return report;
 }
@@ -430,7 +444,7 @@ export function restoreBackup(incoming, strategy) {
 // `no-cache` : le navigateur revalide les fichiers de data/ à chaque chargement (sinon une ancienne copie en cache, p. ex. un config.json sans planner, peut être servie).
 const fetchJson = (name) => fetch(`./data/${name}.json`, { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error(`data/${name}.json : HTTP ${r.status}`); return r.json(); });
 
-const readDay = () => sanitizeDay(readKey('day', null), (state.base.config?.dayTypes ?? []).map((t) => t.id));
+const readDay = () => sanitizeDay(readKey('day', null), (state.base.config?.dayTypes ?? []).map((t) => t.id), { maxTweaks: state.base.config?.planner?.tune?.maxTweaks });
 
 export async function init(load = fetchJson) {
   try {
@@ -440,7 +454,7 @@ export async function init(load = fetchJson) {
     state.user = stored;
     state.user.week = normalizeUserWeek(state.base.week, state.user.week, state.base.days.map((d) => d.id)); // identifiants revalidés : days.json a pu changer
     state.day = readDay();
-    state.plan = sanitizePlan(readKey('plan', null), { dayTypeIds: cfg.dayTypes.map((t) => t.id), adjust: cfg.planner?.adjust });
+    state.plan = sanitizePlan(readKey('plan', null), { dayTypeIds: cfg.dayTypes.map((t) => t.id), adjust: cfg.planner?.adjust, maxTweaks: cfg.planner?.tune?.maxTweaks });
     // Préférences d'interface : revalidées à la lecture (le contenu de data/ ou les aliments ont pu changer).
     Object.assign(state.ui.filters, sanitizeFilters(readKey('filters', null), { config: cfg, foodIds: [...foodIdx.value.keys()] }));
     Object.assign(state.ui.foodFilters, sanitizeFoodFilters(readKey('foodFilters', null), cfg));

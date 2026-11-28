@@ -31,7 +31,7 @@ test('sauvegarde : un aliment perso ⇄ à l\'état de référence « surgelé �
   assert.deepEqual(r.data.foods[0], frozen);
   assert.equal(r.data.foods[1].coef, 0.75);
   assert.equal(r.data.foods[1].weigh, 'cru', 'pesée par défaut : le côté cru de l\'état surgelé');
-  assert.equal(FORMAT, 3, 'aucun changement de format : pas de migration');
+  assert.equal(FORMAT, 4, 'format courant');
 });
 
 test('sauvegarde : le fichier est identifié et nommé avec la date', () => {
@@ -165,10 +165,10 @@ const day = (items = [{ meal: 'col-fb-noix-miel', base: 1 }, { meal: 'perso-m1',
 const WEEK = ['j-repos', 'j-courte', 'j-moyenne', 'j-longue', 'j-dimanche', 'j-veille-longue', 'j-cheat'];
 const plan = (o = {}) => ({ v: 1, seed: 42, adjust: 1, days: [{ label: 'Lundi', dayType: 'courte', seed: 7, adjust: 1, meals: [['Dîner', 'perso-m1'], ['Déjeuner', 'dej-pois-casses-poulet']], removed: [] }, { label: 'Mardi', dayType: 'cheat', seed: 8, adjust: 1, meals: [['Repas plaisir', 'pla-cheat-buffet']], removed: [] }], ...o });
 
-test('format 3 : le format courant est 3 et le fichier contient « Ma journée », le planning et la semaine type', () => {
-  assert.equal(FORMAT, 3);
+test('format courant : le fichier contient « Ma journée », le planning et la semaine type', () => {
+  assert.equal(FORMAT, 4);
   const f = JSON.parse(serialize(user({ day: day(), plan: plan(), week: WEEK })));
-  assert.equal(f.format, 3);
+  assert.equal(f.format, 4);
   assert.deepEqual(f.data.day, day());
   assert.deepEqual(f.data.plan, plan());
   assert.deepEqual(f.data.week, WEEK);
@@ -343,4 +343,78 @@ test('lot D : « removed » invalide ou absent d\'un planning de sauvegarde est 
   const p = sanitizeUser({ plan: { days: [{ label: 'Lundi', dayType: 'courte', meals: [], removed: [['Dîner', 'a'], ['Dîner'], 3, null, [1, 'b']] }, { label: 'Mardi', dayType: 'repos', meals: [], removed: 'non' }] } }).plan;
   assert.deepEqual(p.days[0].removed, [['Dîner', 'a']]);
   assert.deepEqual(p.days[1].removed, []);
+});
+
+// ------------------------------------------------------------------ format 4 : retouches de quantités
+const tweakedPlan = () => plan({ days: [{ label: 'Lundi', dayType: 'courte', seed: 7, adjust: 1, meals: [['Dîner', 'perso-m1'], ['Déjeuner', 'dej-pois-casses-poulet']], removed: [['Collation', 'col-fb-noix-miel']], tweaks: [['Dîner', 'perso-m1', 0, 'perso-f1', 120.5], ['Collation', 'col-fb-noix-miel', 1, 'noix', 15]] }] });
+const tweakedDay = () => day([{ meal: 'col-fb-noix-miel', base: 1, tweaks: [[0, 'fromage-blanc-0', 170]] }, { meal: 'perso-m1', base: 0.75, own: 1.5 }]);
+
+test('format 4 : FORMAT vaut 4 et une migration 3 → 4 explicite existe (aucune retouche dans un fichier de format 3)', () => {
+  assert.equal(FORMAT, 4);
+  assert.equal(typeof MIGRATIONS[3], 'function');
+  const d = { profile: { ...FICTIVE }, day: day(), plan: plan() };
+  assert.deepEqual(MIGRATIONS[3](d), d);
+});
+
+test('format 4 : un fichier de format 3 (planning et journée) s\'importe sans retouche et donne les mêmes données qu\'avant', () => {
+  const v3 = { app: APP, format: 3, exportedAt: '2026-11-27T10:00:00.000Z', data: { profile: { ...FICTIVE }, meals: [meal('m', 'Ok')], foods: [], foodEdits: {}, deletedFoods: [], replacements: {}, day: day(), plan: plan(), week: WEEK } };
+  const r = parseBackup(JSON.stringify(v3));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.data.plan, plan());
+  assert.deepEqual(r.data.day, day());
+  assert.ok(r.data.plan.days.every((d) => !('tweaks' in d)));
+  assert.ok(r.data.day.items.every((it) => !('tweaks' in it)));
+  assert.equal(JSON.stringify(r.data.plan), JSON.stringify(plan()), 'octet pour octet');
+  assert.deepEqual(migrate(v3).plan, v3.data.plan);
+});
+
+test('format 4 : aller-retour sans perte des retouches du planning et de « Ma journée »', () => {
+  const u = user({ meals: [meal('perso-m1', 'Mon repas')], day: tweakedDay(), plan: tweakedPlan() });
+  const r = parseBackup(serialize(u, new Date('2026-11-28T10:00:00Z')));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.data.plan, tweakedPlan());
+  assert.deepEqual(r.data.day, tweakedDay());
+  assert.deepEqual(r.data.plan.days[0].tweaks[0], ['Dîner', 'perso-m1', 0, 'perso-f1', 120.5]);
+});
+
+test('format 4 : un fichier de format 5 est refusé, retouches mal formées écartées à la lecture', () => {
+  assert.match(parseBackup(JSON.stringify({ app: APP, format: 5, data: {} })).error, /version plus récente/);
+  const dirty = tweakedPlan();
+  dirty.days[0].tweaks.push(['Dîner', 'perso-m1', 0, 'x', 5], ['Dîner', 'perso-m1', -1, 'x', 5], 'x', ['Dîner', 'repas-absent', 0, 'x', 5]);
+  const r = parseBackup(JSON.stringify({ app: APP, format: FORMAT, data: { ...emptyUser(), day: { ...tweakedDay(), items: [{ meal: 'a', base: 1, tweaks: [[0, 'x', 5], [0, 'x', 6], [-1, 'x', 5], [1, '', 5], [2, 'y', 'z'], [3, 'y', 20000]] }] }, plan: dirty } }));
+  assert.deepEqual(r.data.plan.days[0].tweaks, tweakedPlan().days[0].tweaks, 'doublon de ligne, ligne négative et repas absent écartés');
+  assert.deepEqual(r.data.day.items[0].tweaks, [[0, 'x', 5]]);
+});
+
+test('fusion format 4 : mealId et foodId des retouches suivent les renommages (planning et « Ma journée »)', () => {
+  const cur = user({ meals: [meal('m1', 'Mon repas')], foods: [food('f1', 'Mon aliment')] });
+  const inc = user({
+    foods: [food('f9', 'Mon aliment')], meals: [meal('m9', 'Mon repas', [['f9', 100]])],
+    day: day([{ meal: 'm9', base: 1, tweaks: [[0, 'f9', 120]] }, { meal: 'col-fb-noix-miel', base: 1 }]),
+    plan: plan({ days: [{ label: 'Lundi', dayType: 'repos', seed: 1, adjust: 1, meals: [['Dîner', 'm9'], ['Déjeuner', 'dej-x']], removed: [], tweaks: [['Dîner', 'm9', 0, 'f9', 120]] }, { label: 'Mardi', dayType: 'repos', seed: 2, adjust: 1, meals: [['Dîner', 'dej-y']], removed: [] }] }),
+  });
+  const ren = mergeBackup(cur, inc, 'rename').user;
+  const mealCopy = ren.meals.find((m) => m.name === 'Mon repas (importé)');
+  const foodCopy = ren.foods.find((f) => f.name === 'Mon aliment (importé)');
+  assert.ok(mealCopy && foodCopy);
+  assert.deepEqual(ren.plan.days[0].tweaks, [['Dîner', mealCopy.id, 0, foodCopy.id, 120]]);
+  assert.deepEqual(ren.day.items[0].tweaks, [[0, foodCopy.id, 120]]);
+  assert.ok(!('tweaks' in ren.plan.days[1]), 'pas de clé tweaks ajoutée à un jour qui n\'en avait pas');
+  assert.ok(!('tweaks' in ren.day.items[1]), 'ni à un item');
+  assert.deepEqual(inc.plan.days[0].tweaks, [['Dîner', 'm9', 0, 'f9', 120]], 'la sauvegarde importée n\'est pas modifiée');
+  const all = mergeBackup(cur, inc, 'replace-all').user;
+  assert.deepEqual(all.plan.days[0].tweaks, inc.plan.days[0].tweaks);
+});
+
+test('fusion format 4 : « garder l\'existant » rabat le repas importé sur l\'existant ; la retouche est conservée dans les données mais ignorée à la lecture', async () => {
+  const { usableTweaks, tweakLimits } = await import('../src/tweaks.js');
+  const cur = user({ meals: [meal('m1', 'Mon repas', [['banane', 100]])] });
+  const inc = user({ meals: [meal('m9', 'Mon repas', [['kiwi', 100]])], plan: plan({ days: [{ label: 'Lundi', dayType: 'repos', seed: 1, adjust: 1, meals: [['Dîner', 'm9']], removed: [], tweaks: [['Dîner', 'm9', 0, 'kiwi', 120]] }] }) });
+  const keep = mergeBackup(cur, inc, 'keep').user;
+  assert.deepEqual(keep.plan.days[0].meals, [['Dîner', 'm1']]);
+  assert.deepEqual(keep.plan.days[0].tweaks, [['Dîner', 'm1', 0, 'kiwi', 120]], 'conservée dans les données');
+  const existing = { cheat: null, incomplete: false, lines: [{ kind: 'food', id: 'banane', qty: 100, missing: false, food: { name: 'Banane' } }] };
+  const limits = { bounds: { min: 0.5, max: 2 }, major: { min: 0.7, max: 1.3 } };
+  assert.deepEqual(usableTweaks(existing, [[0, 'kiwi', 120]], limits), [], 'ignorée à la lecture : la ligne n\'est plus le même aliment');
+  assert.equal(typeof tweakLimits, 'function');
 });

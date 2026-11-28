@@ -4,9 +4,10 @@ import * as C from '../calc.js';
 import * as S from '../store.js';
 import Bar from './Bar.js';
 import IngredientList from './IngredientList.js';
+import TweakMark from './TweakMark.js';
 
 export default {
-  components: { Bar, IngredientList },
+  components: { Bar, IngredientList, TweakMark },
   setup() {
     const d = S.state.day;
     const copy = () => S.copyWithToast(C.dayToText(S.config.value.dayTypes.find((t) => t.id === d.dayType).label, S.dayRows.value, S.dayTotals.value, S.dayTarget.value), 'Journée copiée.');
@@ -28,7 +29,7 @@ export default {
       </div>
       <ul v-if="rows.length" class="dayrows">
         <li v-for="r in rows" :key="r.index">
-          <div class="dayrow-head"><b><button type="button" class="linklike dayrow-name" @click="sheet(r)" :title="'Ouvrir la fiche de ' + r.meal.name">{{ r.meal.name }}</button></b><button type="button" class="icon" @click="remove(r.index)" :aria-label="'Retirer ' + r.meal.name">✕</button></div>
+          <div class="dayrow-head"><b><button type="button" class="linklike dayrow-name" @click="sheet(r)" :title="'Ouvrir la fiche de ' + r.meal.name">{{ r.meal.name }}</button><tweak-mark v-if="r.tweaks" :meal="r.meal" :factor="r.factor" @open="sheet(r)" /></b><button type="button" class="icon" @click="remove(r.index)" :aria-label="'Retirer ' + r.meal.name">✕</button></div>
           <div class="dayrow-meta">
             <span class="badge">{{ r.meal.category }}</span>
             <span class="dens" :title="'Densité : ' + r.meal.density.label">{{ r.meal.density.emoji }} {{ r.meal.density.label }}</span>
@@ -42,7 +43,7 @@ export default {
             <span v-if="r.own" class="badge soft" title="Facteur réglé sur ce repas">fixé</span>
             <button v-if="r.own" type="button" class="icon" @click="release(r.index)" :aria-label="'Revenir au facteur global pour ' + r.meal.name" title="Revenir au facteur global">↺</button>
           </div>
-          <details v-if="r.meal.lines.length"><summary>Ingrédients</summary><ingredient-list :lines="r.meal.lines" :factor="r.factor" substitutable @substitute="substitute(r, $event)" /></details>
+          <details v-if="r.meal.lines.length"><summary>Ingrédients</summary><ingredient-list :lines="r.meal.lines" :factor="r.factor" :tweaks="r.tweaks" substitutable @substitute="substitute(r, $event)" /></details>
         </li>
       </ul>
       <p v-else class="empty">Ajoute des repas avec « + Ma journée ».</p>

@@ -6,7 +6,12 @@
 // à la volée (`viewPlan`) depuis les repas, le profil et la config.
 //
 //   plan = { v: 1, seed, adjust: 1,
-//            days: [{ label, dayType, seed, adjust: 1, meals: [[créneau, idRepas], …], removed: [[créneau, idRepas], …] }] }
+//            days: [{ label, dayType, seed, adjust: 1, meals: [[créneau, idRepas], …], removed: [[créneau, idRepas], …],
+//                     tweaks?: [[créneau, idRepas, ligne, idAliment, grammes], …] }] }
+//
+// Retouche des quantités (`tuneDay`, config.planner.tune) : après le tirage, jamais avant, le jour est ramené plus près de ses cibles en
+// changeant de quelques dizaines de grammes la quantité de 5 lignes d'aliments au plus. Le choix des repas n'est pas touché ; la retouche
+// est un choix stocké (`day.tweaks`, clé absente quand il n'y en a pas), les repas retouchés sont dérivés par `viewPlan` (src/tweaks.js).
 //
 // Un repas retiré reste dans `removed` : il compte pour le facteur de portion et le budget du jour (`basis`), mais plus pour
 // les apports, le bilan, la liste de courses ni « Ma journée » ; il peut être rétabli. `adjust` (semaine, jour) multiplie le
@@ -31,8 +36,9 @@
 // Le contexte `ctx` : { meals (repas résolus par calc.resolveMeal), mealIdx?, config, targets (calc.allTargets ou null),
 // week (semaine type : [{ label, dayType }]), reference? ({ [typeDeJournée]: kcal }, pour choisir sans profil) }.
 
-import { add, convertQty, fitFactor, fmtKcal, fmtNum, fmtQty, isConvertible, scale, sum, unitOf } from './calc.js';
+import { add, convertQty, fitFactor, fmtKcal, fmtNum, fmtQty, isConvertible, scale, sum, unitOf, zero } from './calc.js';
 import { clampFactor, FACTOR_MAX, FACTOR_MIN } from './day.js';
+import { DEFAULT_MAX_TWEAKS, tweakedMeal, tweakLimits } from './tweaks.js';
 import { weekBudget } from './week.js';
 
 export const PLAN_VERSION = 1;
@@ -357,7 +363,115 @@ export function planBudgets(ctx, plan) {
 }
 
 // ------------------------------------------------------------------ génération
-const clonePlan = (plan) => ({ ...plan, days: plan.days.map((d) => ({ ...d, meals: d.meals.map((m) => [...m]), removed: (d.removed ?? []).map((m) => [...m]) })) });
+const clonePlan = (plan) => ({
+  ...plan,
+  days: plan.days.map((d) => {
+    const c = { ...d, meals: d.meals.map((m) => [...m]), removed: (d.removed ?? []).map((m) => [...m]) };
+    if (d.tweaks) c.tweaks = d.tweaks.map((t) => [...t]); // copie profonde : « Annuler » restaure l'état d'avant
+    return c;
+  }),
+});
+
+// ------------------------------------------------------------------ retouche des quantités
+/** Réglages de la retouche, ou null quand elle est désactivée (`enabled` faux ou bloc absent). Seule lecture de `enabled` ; `bounds` et `major` : `tweakLimits`. */
+export const tuneOpts = (config) => {
+  const t = tweakLimits(config);
+  return t?.enabled ? t : null;
+};
+
+/**
+ * Retouche de quantités d'un jour (descente par pas, déterministe, pure) : à chaque tour, le pas d'une seule ligne qui réduit le plus le coût
+ * (écarts aux cibles du jour : kcal, protéines, glucides, lipides, fibres, plus une régularisation) ; fin quand aucun pas n'améliore le coût
+ * ou à `maxIterations`. Au plus `maxTweaks` lignes distinctes sont différentes de leur quantité de recette. Les repas ne changent pas.
+ * @param {object} ctx contexte du planificateur (`config`, `targets`) @param {{id:string}} dt type de journée
+ * @param {{slot:string, meal:object|null}[]} items repas résolus du jour entier (quantités de la recette, repas non retirés)
+ * @param {number|null} budget kcal du jour (`planBudgets`)
+ * @returns {[string, string, number, string, number][]} [créneau, idRepas, ligne, idAliment, grammes] (vide s'il n'y a rien à retoucher)
+ */
+export function tuneDay(ctx, dt, items, budget) {
+  const { config } = ctx;
+  const t = tuneOpts(config);
+  const target = ctx.targets?.[dt.id] ?? null;
+  if (!t || !target || !(budget > 0) || isFixedType(config, dt.id)) return [];
+  const excluded = new Set(t.excludeCategories);
+  const tot = zero(); // totaux du jour à facteur de portion 1 : repas incomplets exclus, repas cheat inclus
+  const levers = [];
+  for (const { slot, meal } of items) {
+    if (!meal || meal.incomplete) continue;
+    for (const k of Object.keys(tot)) tot[k] += meal.totals[k];
+    if (meal.cheat || excluded.has(meal.category)) continue;
+    meal.lines.forEach((l, line) => {
+      const rule = l.kind === 'food' && l.food && !l.missing && l.qty > 0 ? t.types[l.food.type] : null;
+      if (!rule) return;
+      const per = Object.fromEntries(Object.keys(tot).map((k) => [k, l.macros[k] / l.qty])); // macros par gramme, depuis la ligne
+      levers.push({ slot, meal, line, foodId: l.id, q0: l.qty, q: l.qty, per, lo: l.qty * rule.min, hi: l.qty * rule.max, step: rule.step });
+    });
+  }
+  if (!levers.length) return [];
+  const w = t.weights;
+  const rel = (v, ref) => (ref > 0 ? v / ref : 0); // une cible nulle (glucides au plancher) ne pénalise pas
+  const cost = (x, reg) => {
+    const prot = x.protein < target.protein.min ? (target.protein.min - x.protein) / target.protein.min
+      : x.protein > target.protein.max ? (x.protein - target.protein.max) / target.protein.max : 0; // 0 dans la fourchette
+    return w.kcal * rel(x.kcal - budget, budget) ** 2
+      + w.protein * prot ** 2
+      + w.carbs * rel(x.carbs - target.carbs, target.carbs) ** 2
+      + w.fat * rel(x.fat - target.fat, target.fat) ** 2
+      + w.fiber * Math.max(0, rel(target.fiber - x.fiber, target.fiber)) ** 2 // seul un manque de fibres pénalise
+      + w.reg * reg; // reg = Σ ((q − q0) / q0) ** 2 sur les leviers
+  };
+  const isBase = (l) => Math.abs(l.q - l.q0) < 1e-9;
+  let reg = 0;
+  let tweaked = 0;
+  let cur = cost(tot, reg);
+  const probe = {};
+  for (let it = 0; it < t.maxIterations; it += 1) {
+    let best = null;
+    for (const l of levers) { // ordre : repas de `items`, puis lignes ; c'est l'ordre de départ
+      for (const dir of [-1, 1]) { // −1 avant +1 : il fixe le départage des égalités
+        let q = Math.round((l.q + dir * l.step) * 100) / 100;
+        if (Math.abs(q - l.q0) < 1e-9) q = l.q0;
+        if (q < l.lo - 1e-9 || q > l.hi + 1e-9 || q <= 0) continue;
+        if (isBase(l) && tweaked >= t.maxTweaks) continue; // plafond de lignes : un levier à q0 ne peut pas s'ouvrir
+        for (const k of Object.keys(tot)) probe[k] = tot[k] + l.per[k] * (q - l.q);
+        const c = cost(probe, reg - ((l.q - l.q0) / l.q0) ** 2 + ((q - l.q0) / l.q0) ** 2);
+        if (c < cur - 1e-12 && (!best || c < best.c)) best = { l, q, c }; // strictement meilleur : le premier trouvé gagne en cas d'égalité
+      }
+    }
+    if (!best) break;
+    const { l, q } = best;
+    for (const k of Object.keys(tot)) tot[k] += l.per[k] * (q - l.q);
+    reg += ((q - l.q0) / l.q0) ** 2 - ((l.q - l.q0) / l.q0) ** 2;
+    const wasBase = isBase(l);
+    l.q = q;
+    if (wasBase) tweaked += 1; else if (isBase(l)) tweaked -= 1;
+    cur = best.c;
+  }
+  return levers.filter((l) => !isBase(l)).map((l) => [l.slot, l.meal.id, l.line, l.foodId, l.q]);
+}
+
+/**
+ * Calcule et enregistre la retouche du jour `index` (`day.tweaks`, clé absente s'il n'y en a pas). Ne fait rien quand la retouche est
+ * désactivée. Appelée APRÈS le tirage : elle ne le modifie jamais. `budget` : celui du jour (`planBudgets`), null sans profil.
+ */
+function tuneDayInPlan(ctx, plan, index, budget) {
+  if (!tuneOpts(ctx.config)) return;
+  const day = plan.days[index];
+  const dt = dayTypeOf(ctx.config, day.dayType);
+  if (!dt) return;
+  const idx = mealIndex(ctx);
+  const tweaks = tuneDay(ctx, dt, day.meals.map(([slot, id]) => ({ slot, meal: idx.get(id) ?? null })), budget);
+  if (tweaks.length) day.tweaks = tweaks; else delete day.tweaks;
+}
+
+/** Supprime les retouches du repas (`slot`, `mealId`) d'un jour, sauf si ce couple figure encore dans ses repas ou ses repas retirés. */
+function dropTweaksOf(day, slot, mealId) {
+  if (!day.tweaks) return;
+  const still = (list) => (list ?? []).some(([s, id]) => s === slot && id === mealId);
+  if (still(day.meals) || still(day.removed)) return;
+  const kept = day.tweaks.filter(([s, id]) => !(s === slot && id === mealId));
+  if (kept.length) day.tweaks = kept; else delete day.tweaks;
+}
 
 // ------------------------------------------------------------------ ajustements de portions
 const snap = (v, step) => Math.round(Math.round(v / step) * step * 1e6) / 1e6;
@@ -404,6 +518,8 @@ export function generateWeek(ctx, { seed = 1, dayTypes = null } = {}) {
   for (const i of order) {
     plan.days[i].meals = drawDay(ctx, dts[i], plan.days[i].seed, stateOf(ctx, plan, i), { budget: budgets?.[i] ?? null, salmon: i === salmonDay, legume: legumeDays.has(i) });
   }
+  // Retouche des quantités : une fois tous les jours tirés. Les jours fixes n'ont pas de budget (aucune retouche).
+  for (const i of order) tuneDayInPlan(ctx, plan, i, budgets?.[i] ?? null);
   return plan;
 }
 
@@ -421,7 +537,10 @@ function redrawDay(ctx, plan, index) {
   const fixed = isFixedType(ctx.config, day.dayType);
   const salmon = !fixed && state.salmon === 0 && canSalmon(ctx, dt, state); // le saumon de la semaine ne doit pas disparaître
   const legume = !fixed && state.legume < ctx.config.planner.rules.minLegumeMeals;
-  day.meals = drawDay(ctx, dt, day.seed, state, { budget: planBudgets(ctx, plan)?.[index] ?? null, salmon, legume });
+  const budget = planBudgets(ctx, plan)?.[index] ?? null;
+  day.meals = drawDay(ctx, dt, day.seed, state, { budget, salmon, legume });
+  delete day.tweaks; // les retouches sont recalculées de zéro pour ce jour ; les autres jours gardent les leurs
+  tuneDayInPlan(ctx, plan, index, budget);
   return plan;
 }
 
@@ -502,7 +621,9 @@ export function replacePlanMeal(plan, index, fromMealId, toMealId) {
   const at = day?.meals.findIndex(([, id]) => id === fromMealId) ?? -1;
   if (at < 0) return plan;
   const next = clonePlan(plan);
+  const slot = next.days[index].meals[at][0];
   next.days[index].meals[at][1] = toMealId;
+  dropTweaksOf(next.days[index], slot, fromMealId); // le nouveau repas part sans retouche
   return next;
 }
 
@@ -573,6 +694,7 @@ export function replacePlanMealAt(plan, dayIndex, mealIndex, toMealId) {
   if (!entry || entry[1] === toMealId) return plan;
   const next = clonePlan(plan);
   next.days[dayIndex].meals[mealIndex][1] = toMealId;
+  dropTweaksOf(next.days[dayIndex], entry[0], entry[1]); // les retouches de l'ancien repas disparaissent (sauf s'il figure encore dans le jour)
   return next;
 }
 
@@ -607,11 +729,27 @@ export function viewPlan(ctx, plan) {
   const budgets = planBudgets(ctx, plan);
   const planAdjust = plan.adjust ?? 1;
   const macros = (list) => sum(list.filter((it) => it.meal && !it.meal.incomplete).map((it) => it.meal.totals));
+  // Les retouches stockées s'appliquent même quand `tune.enabled` est faux (l'interrupteur arrête le calcul, il ne réécrit pas un planning).
+  const limits = tweakLimits(config);
   const days = plan.days.map((d, i) => {
     const dt = dayTypeOf(config, d.dayType);
     const fixed = isFixedType(config, d.dayType);
-    const items = d.meals.map(([slot, id]) => ({ slot, id, meal: idx.get(id) ?? null }));
-    const removedItems = (d.removed ?? []).map(([slot, id]) => ({ slot, id, meal: idx.get(id) ?? null }));
+    // Retouches du jour par repas : (créneau, repas) → [ligne, aliment, grammes][]. Seules les valides à la lecture sont gardées (tweakedMeal).
+    const tw = new Map();
+    for (const [slot, id, line, foodId, grams] of d.tweaks ?? []) {
+      const key = `${slot}\u0000${id}`;
+      if (!tw.has(key)) tw.set(key, []);
+      tw.get(key).push([line, foodId, grams]);
+    }
+    const resolve = ([slot, id]) => {
+      const recipe = idx.get(id) ?? null;
+      const meal = recipe && tw.has(`${slot}\u0000${id}`) ? tweakedMeal(recipe, tw.get(`${slot}\u0000${id}`), limits) : recipe;
+      const item = { slot, id, meal };
+      if (meal?.tweaks) item.tweaks = meal.tweaks; // absent pour un repas non retouché
+      return item;
+    };
+    const items = d.meals.map(resolve);
+    const removedItems = (d.removed ?? []).map(resolve); // un repas retiré reste retouché : il compte pour le facteur de départ
     const totals = macros(items); // apports : repas présents seulement
     const basis = add(totals, macros(removedItems)); // base du facteur : repas retirés encore existants compris
     const budget = budgets ? budgets[i] : null;
@@ -746,14 +884,41 @@ export function shoppingToText(shopping, title = 'Liste de courses de la semaine
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
+ * Retouches d'un jour : structure seulement (les recettes ne sont pas connues ici ; bornes et aliment sont vérifiés par `viewPlan`).
+ * Garde les retouches [créneau, repas, ligne, aliment, grammes] bien formées d'un repas présent ou retiré du jour, sans doublon sur
+ * (créneau, repas, ligne), au plus `max` dans l'ordre stocké, grammes arrondis à 0,01 g. Les autres sont ignorées sans erreur.
+ */
+function cleanTweaks(list, pairs, max) {
+  if (!Array.isArray(list)) return [];
+  const present = new Set(pairs.map(([slot, id]) => `${slot}\u0000${id}`));
+  const seen = new Set();
+  const out = [];
+  const text = (v) => typeof v === 'string' && v !== '';
+  for (const t of list) {
+    if (out.length >= max) break;
+    if (!Array.isArray(t) || t.length !== 5) continue;
+    const [slot, id, line, foodId, grams] = t;
+    if (!text(slot) || !text(id) || !Number.isInteger(line) || line < 0 || !text(foodId)) continue;
+    if (typeof grams !== 'number' || !Number.isFinite(grams) || !(grams > 0) || grams > 10000) continue;
+    const g = Math.round(grams * 100) / 100;
+    const key = `${slot}\u0000${id}\u0000${line}`;
+    if (!(g > 0) || !present.has(`${slot}\u0000${id}`) || seen.has(key)) continue;
+    seen.add(key);
+    out.push([slot, id, line, foodId, g]);
+  }
+  return out;
+}
+
+/**
  * Relit un planning enregistré (stockage du navigateur ou sauvegarde JSON) : types, listes et graines revalidés ; null si
  * la structure est inutilisable. Les repas sont gardés tels quels : un repas supprimé depuis est signalé par `viewPlan`.
  * Un planning enregistré sans `adjust` ni `removed` (ancienne forme) se relit avec `adjust: 1` et `removed: []`.
  * `adjust` (config.planner.adjust) borne les ajustements aux plages de la config ; sans lui (lecture d'une sauvegarde avant le
  * chargement de la config), seuls les nombres strictement positifs sont gardés et la plage est revalidée au chargement.
- * @param {any} raw @param {{dayTypeIds?: string[], adjust?: object}} [opts]
+ * `maxTweaks` (config.planner.tune.maxTweaks) : plafond de retouches par jour, 5 par défaut avant le chargement de la config.
+ * @param {any} raw @param {{dayTypeIds?: string[], adjust?: object, maxTweaks?: number}} [opts]
  */
-export function sanitizePlan(raw, { dayTypeIds, adjust } = {}) {
+export function sanitizePlan(raw, { dayTypeIds, adjust, maxTweaks = DEFAULT_MAX_TWEAKS } = {}) {
   if (!isObj(raw) || !Array.isArray(raw.days) || !raw.days.length || raw.days.length > 14) return null;
   const adj = (v, scope) => (Number.isFinite(v) && v > 0 ? (adjust ? clampAdjustWith(adjust, scope, v) : v) : 1);
   const mealPairs = (list) => (Array.isArray(list) ? list : []).filter((m) => Array.isArray(m) && typeof m[0] === 'string' && typeof m[1] === 'string').map((m) => [m[0], m[1]]);
@@ -761,7 +926,10 @@ export function sanitizePlan(raw, { dayTypeIds, adjust } = {}) {
   for (const d of raw.days) {
     if (!isObj(d) || typeof d.label !== 'string' || !d.label.trim() || typeof d.dayType !== 'string' || !d.dayType) return null;
     if (dayTypeIds && !dayTypeIds.includes(d.dayType)) return null;
-    days.push({ label: d.label.slice(0, 40), dayType: d.dayType, seed: uint(d.seed), adjust: adj(d.adjust, 'day'), meals: mealPairs(d.meals), removed: mealPairs(d.removed) });
+    const day = { label: d.label.slice(0, 40), dayType: d.dayType, seed: uint(d.seed), adjust: adj(d.adjust, 'day'), meals: mealPairs(d.meals), removed: mealPairs(d.removed) };
+    const tweaks = cleanTweaks(d.tweaks, [...day.meals, ...day.removed], maxTweaks);
+    if (tweaks.length) day.tweaks = tweaks; // clé absente quand il n'y a aucune retouche : un ancien planning ressort identique
+    days.push(day);
   }
   return { v: PLAN_VERSION, seed: uint(raw.seed), adjust: adj(raw.adjust, 'week'), days };
 }

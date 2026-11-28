@@ -835,7 +835,7 @@ test('retrait : facteur et budgets inchangés, apports baissés du repas × fact
       for (const i of [0, 2, 3, 5]) { // 2 : jour du cheat meal
         const k = Math.min(1, plan.days[i].meals.length - 1);
         const [slot, id] = plan.days[i].meals[k];
-        const kcal = ctx.mealIdx.get(id).totals.kcal;
+        const kcal = before.days[i].items[k].meal.totals.kcal; // le repas lu par viewPlan (quantités retouchées), pas la recette
         const next = P.removeMealAt(plan, i, k);
         const after = P.viewPlan(ctx, next);
         const where = `${profile ? 'profil' : 'sans profil'}, graine ${seed}, jour ${i}`;
