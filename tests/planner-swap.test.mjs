@@ -265,14 +265,18 @@ test('après un remplacement, un repas signalé donne l\'avertissement habituel 
   const milkCocoa = w.meals.find((m) => P.hasMilkCocoa(m, w.config) && m.category === 'Récupération');
   const view = P.viewPlan(ctx, P.replacePlanMealAt(plan, 0, rec, milkCocoa.id));
   assert.ok(view.warnings.some((x) => x.code === 'milk-cocoa' && x.day === plan.days[0].label));
-  // un repas déjà présent ailleurs : « revient 2 fois », en information (niveau `info`) et non en avertissement
+  // un repas déjà présent ailleurs (2 fois, sous le plafond) : une répétition normale, aucune information ni avertissement
   const dejMardi = plan.days[1].meals[slotIndex(plan, 1, 'Déjeuner')][1];
   const rep = P.viewPlan(ctx, P.replacePlanMealAt(plan, 0, slotIndex(plan, 0, 'Déjeuner'), dejMardi));
-  const repeat = rep.warnings.filter((x) => x.code === 'repeat');
-  assert.equal(repeat.length, 1);
-  assert.equal(repeat[0].level, 'info');
-  assert.equal(repeat[0].day, null);
+  assert.ok(!rep.warnings.some((x) => x.code === 'repeat'), 'l\'information « repeat » n\'existe plus');
+  assert.ok(!rep.warnings.some((x) => x.code === 'repeat-cap'));
   assert.ok(rep.warnings.filter((x) => x.level === 'warn').every((x) => P.viewPlan(ctx, plan).warnings.some((b) => b.code === x.code && b.day === x.day)), 'aucun avertissement nouveau');
+  // une 3e occurrence dépasse le plafond : information « repeat-cap » (niveau `info`)
+  const third = P.replacePlanMealAt(P.replacePlanMealAt(plan, 0, slotIndex(plan, 0, 'Déjeuner'), dejMardi), 3, slotIndex(plan, 3, 'Déjeuner'), dejMardi);
+  const cap = P.viewPlan(ctx, third).warnings.filter((x) => x.code === 'repeat-cap');
+  assert.equal(cap.length, 1);
+  assert.equal(cap[0].level, 'info');
+  assert.equal(cap[0].day, null);
   // un autre créneau : l'avertissement habituel « catégorie » apparaît dans le planning, au jour concerné
   const mardiDinner = slotIndex(plan, 1, 'Dîner');
   const dej = w.meals.find((m) => m.category === 'Déjeuner' && !plan.days.some((d) => d.meals.some(([, id]) => id === m.id)));
@@ -288,7 +292,7 @@ test('après un remplacement, un repas signalé donne l\'avertissement habituel 
     for (const cand of P.swapCandidates(ctx, plan, di, mi).slice(0, 6)) {
       for (const x of P.viewPlan(ctx, P.replacePlanMealAt(plan, di, mi, cand.id)).warnings) {
         if (['kcal-gap', 'floor'].includes(x.code)) continue; // l'écart de budget dépend des portions, pas d'une règle alimentaire
-        if (x.level === 'info') { assert.equal(x.code, 'repeat'); continue; }
+        if (x.level === 'info') { assert.equal(x.code, 'repeat-cap'); continue; }
         assert.ok(base.has(x.code + x.day), `${d.label} : avertissement « ${x.code} » après remplacement par ${cand.name}`);
       }
     }

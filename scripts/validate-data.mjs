@@ -209,6 +209,14 @@ export function validateData({ foods, internal, meals, days, config }) {
       for (const id of list) if (!foodIds.has(id)) err(`config.planner.rules.${label} : aliment « ${id} » inconnu`);
     }
     for (const o of r.milkCocoa?.outings ?? []) if (!outingIds.includes(o)) err(`config.planner.rules.milkCocoa.outings : sortie « ${o} » inconnue`);
+    const va = pl.variety;
+    if (!isObj(va)) err('config.planner.variety : bloc { maxPerMeal, minDistinctShare, reuseWeight, ingredientAffinity } manquant');
+    else {
+      if (!Number.isInteger(va.maxPerMeal) || va.maxPerMeal < 1) err('config.planner.variety.maxPerMeal : entier ≥ 1 attendu');
+      if (!isNum(va.minDistinctShare) || va.minDistinctShare < 0 || va.minDistinctShare > 1) err('config.planner.variety.minDistinctShare : entre 0 et 1 attendu');
+      if (!isNum(va.reuseWeight) || va.reuseWeight <= 0) err('config.planner.variety.reuseWeight : nombre strictement positif attendu');
+      if (!isNum(va.ingredientAffinity) || va.ingredientAffinity < 0) err('config.planner.variety.ingredientAffinity : nombre positif ou nul attendu');
+    }
     if (!Number.isInteger(pl.attempts) || pl.attempts < 1) err('config.planner.attempts : entier ≥ 1 attendu');
     if (!isNum(pl.floor) || pl.floor <= 0 || pl.floor > 1) err('config.planner.floor : entre 0 (exclu) et 1 attendu');
     if (!isNum(pl.step) || pl.step <= 0 || pl.step > 0.5) err('config.planner.step : entre 0 (exclu) et 0,5 attendu');

@@ -15,6 +15,8 @@ export default {
     const view = S.planView;
     const dayTypes = S.config.value.dayTypes;
     const minLegume = S.config.value.planner.rules.minLegumeMeals;
+    const { maxPerMeal, minDistinctShare } = S.config.value.planner.variety;
+    const distinctPct = Math.round(minDistinctShare * 100);
     const adjust = S.config.value.planner.adjust;
     // Un jour a-t-il des ajustements qui changent ses portions ? (le jour fixe n'en a pas)
     const adjusted = (d) => Math.abs(d.mult - 1) > 1e-9;
@@ -31,7 +33,7 @@ export default {
       if (S.addPlanDayToMyDay(d.index)) S.toast(`${d.label} ajouté à Ma journée.`);
     };
     return {
-      state: S.state, view, dayTypes, minLegume, adjust, adjusted, hasFixed, toMyDayDisabled, sameAsTemplate, warnings, sign, sheet, toMyDay, status: S.profileStatus, STATUS,
+      state: S.state, view, dayTypes, minLegume, maxPerMeal, distinctPct, adjust, adjusted, hasFixed, toMyDayDisabled, sameAsTemplate, warnings, sign, sheet, toMyDay, status: S.profileStatus, STATUS,
       setAdjust: S.setPlanAdjust, setDayAdjust: S.setPlanDayAdjust, realign: (d) => S.realignPlanDay(d.index),
       swapMeal: (d, i) => S.openDialog('mealSwap', { dayIndex: d.index, mealIndex: i }), removeMeal: (d, i) => S.removePlanMeal(d.index, i), restoreMeal: (d, j) => S.restorePlanMeal(d.index, j),
       dayResetLabel: (d) => `Remettre l'ajustement du ${d.label} à ×1`, n2: (v) => C.fmtNum(v, 2), pct: (v) => C.fmtSigned((v - 1) * 100),
@@ -43,7 +45,7 @@ export default {
   template: `
     <section aria-labelledby="t-planner">
       <h2 id="t-planner">Planificateur de semaine</h2>
-      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée (la semaine type se règle dans l'onglet Cibles et hypothèses). Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses au moins {{ minLegume }} fois dans la semaine, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue, aucun repas répété. Les curseurs d'ajustement (semaine, jour) multiplient les portions calculées ; ⇄ remplace un repas par un autre repas proche (les portions du jour sont recalculées) ; ✕ retire un repas sans recalculer les autres portions : le total du jour baisse, et « Rétablir » le remet.</p>
+      <p class="muted">Une semaine de repas tirés au sort parmi le recueil, selon le type de chaque journée (la semaine type se règle dans l'onglet Cibles et hypothèses). Le budget de chaque jour vient de ta dépense (le jour du cheat meal est fixe, les autres jours se partagent le reste, jamais sous 90 % de leur dépense) ; un facteur de portion ramène chaque jour à son budget. Règles tenues : légumineuses au moins {{ minLegume }} fois dans la semaine, saumon au moins une fois, abats une fois au plus, lait et cacao sucré seulement après une sortie moyenne ou longue ; un repas peut revenir jusqu'à {{ maxPerMeal }} fois dans la semaine (jamais deux fois le même jour), avec au moins {{ distinctPct }} % de repas distincts. Les curseurs d'ajustement (semaine, jour) multiplient les portions calculées ; ⇄ remplace un repas par un autre repas proche (les portions du jour sont recalculées) ; ✕ retire un repas sans recalculer les autres portions : le total du jour baisse, et « Rétablir » le remet.</p>
       <p v-if="!status.complete" class="notice">Renseigne <button type="button" class="linklike" @click="profile">Mon profil</button> pour obtenir les budgets et les facteurs de portion (il manque : {{ status.missing.join(', ') }}). Sans profil, les repas sont tirés près d'une journée type, avec des portions ×1 et sans écart à la cible.</p>
 
       <div class="plan-actions">

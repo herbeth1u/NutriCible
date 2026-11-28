@@ -24,8 +24,9 @@
 //
 // Règles dures : au moins `minLegumeMeals` repas avec une légumineuse dans la semaine (placés sur autant de jours différents),
 // saumon au moins une fois, abats au plus une fois par semaine, lait + cacao sucré seulement les jours de sortie moyenne ou
-// longue, aucun repas répété dans la semaine. Si une règle est impossible à tenir, le tirage la relâche (voir LEVELS) et
-// `viewPlan` affiche l'avertissement correspondant.
+// longue, variété minimale (un repas revient au plus `variety.maxPerMeal` fois, jamais deux fois le même jour, et au moins
+// `variety.minDistinctShare` de repas distincts hors cheat meal). Si une règle est impossible à tenir, le tirage la relâche
+// (voir LEVELS) et `viewPlan` affiche l'avertissement correspondant.
 //
 // Le contexte `ctx` : { meals (repas résolus par calc.resolveMeal), mealIdx?, config, targets (calc.allTargets ou null),
 // week (semaine type : [{ label, dayType }]), reference? ({ [typeDeJournée]: kcal }, pour choisir sans profil) }.
@@ -66,6 +67,16 @@ export function mixSeed(...parts) {
 }
 
 const pickOne = (rng, list) => list[Math.floor(rng() * list.length)];
+/** Tirage pondéré : un seul appel au générateur ; `weight(élément)` > 0. */
+function pickWeighted(rng, list, weight) {
+  const ws = list.map(weight);
+  let r = rng() * ws.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < list.length; i += 1) {
+    r -= ws[i];
+    if (r < 0) return list[i];
+  }
+  return list[list.length - 1];
+}
 /** `n` éléments distincts tirés au hasard (mélange partiel de Fisher-Yates sur une copie). */
 function sample(rng, list, n) {
   const a = [...list];
@@ -114,15 +125,50 @@ export const milkCocoaAllowed = (config, dt) => config.planner.rules.milkCocoa.o
 
 const NEEDS = { salmon: isSalmon, legume: isLegume };
 
+// ------------------------------------------------------------------ variété
+const FOOD_IDS = new WeakMap(); // repas → identifiants d'aliments et d'ingrédients de recettes (distincts), comme la liste de courses
+/** Aliments (et ingrédients de recettes) d'un repas : ce qu'il faut acheter, sans doublon. */
+export function foodIdsOf(meal) {
+  let ids = FOOD_IDS.get(meal);
+  if (!ids) {
+    ids = [...new Set(meal.lines.filter((l) => l.food && !l.missing).map((l) => l.id))];
+    FOOD_IDS.set(meal, ids);
+  }
+  return ids;
+}
+
+/**
+ * Budget de répétitions de la semaine : `floor((1 − minDistinctShare) × créneaux de la semaine hors jour fixe)`. Une répétition
+ * est un créneau dont le repas est déjà dans la semaine ; une fois le budget consommé, aucune nouvelle répétition n'est tirée.
+ * `dayTypeIds` : le type de journée de chaque jour du planning.
+ */
+export function varietyBudget(config, dayTypeIds) {
+  const slots = dayTypeIds.reduce((n, id) => {
+    const dt = dayTypeOf(config, id);
+    return dt && !isFixedType(config, id) ? n + slotsFor(config, dt).length : n;
+  }, 0);
+  return Math.floor((1 - config.planner.variety.minDistinctShare) * slots + 1e-9); // 1e-9 : (1 − 0,8) × 10 vaut 1,9999999999999996
+}
+
 // ------------------------------------------------------------------ candidats
 /**
  * Candidats d'un créneau : repas complets de la catégorie, filtrés par les règles dures, puis par contexte en cascade
- * (premier contexte de la liste qui a au moins un candidat). `f` : { used, offalLeft, repeat, anyContext }.
+ * (premier contexte de la liste qui a au moins un candidat). `f` : { counts, taken, repeatsLeft, offalLeft, repeat, anyContext }.
+ * Un repas est écarté s'il est déjà pris ce jour-là (`taken`), s'il a atteint `variety.maxPerMeal` dans la semaine (`counts`, les
+ * autres jours) ou s'il serait une nouvelle répétition alors que le budget est consommé (`repeatsLeft`). Un jour fixe (cheat meal)
+ * ne répète pas : ses blocs ne comptent pas dans le budget de variété. Niveau `repeat` : dernier recours, tous ces plafonds sautent
+ * (les répétitions restent réparties : on garde les repas les moins utilisés).
  */
 function poolFor(ctx, dt, slot, f, pred = null) {
   const { config } = ctx;
   const fixed = isFixedType(config, dt.id);
   const mcOk = milkCocoaAllowed(config, dt);
+  const cap = fixed ? 1 : config.planner.variety.maxPerMeal;
+  const open = (m) => {
+    if (f.taken.has(m.id)) return false;
+    const n = f.counts.get(m.id) ?? 0;
+    return n < cap && (fixed || n === 0 || f.repeatsLeft > 0);
+  };
   const base = ctx.meals.filter((m) => !m.incomplete && m.category === slot && !!m.cheat === fixed
     && (mcOk || !hasMilkCocoa(m, config)) && (f.offalLeft > 0 || !isOffal(m, config)) && (!pred || pred(m)));
   const cascade = (list) => {
@@ -132,32 +178,53 @@ function poolFor(ctx, dt, slot, f, pred = null) {
     }
     return f.anyContext ? list : [];
   };
-  const out = cascade(base.filter((m) => !f.used.has(m.id)));
-  return !out.length && f.repeat ? cascade(base) : out;
+  const out = cascade(base.filter(open));
+  if (out.length || !f.repeat) return out;
+  // Dernier recours : les plafonds sautent, mais on répartit les répétitions (le repas le moins utilisé d'abord, jour même compris).
+  const all = cascade(base);
+  const used = (m) => (f.counts.get(m.id) ?? 0) + (f.taken.has(m.id) ? 1 : 0);
+  const least = Math.min(...all.map(used));
+  return all.filter((m) => used(m) === least);
 }
 
-/** Ce qui est déjà pris dans la semaine hors le jour `except` : repas, abats, saumon, repas à légumineuses. */
+/**
+ * Ce qui est déjà pris dans la semaine hors le jour `except` : occurrences de chaque repas (`counts`, `used` = repas présents),
+ * aliments à acheter (`foods`, jours ordinaires), répétitions déjà consommées et reste du budget (`repeats`, `repeatsLeft`),
+ * abats, saumon, repas à légumineuses (par occurrence).
+ */
 function stateOf(ctx, plan, except) {
+  const { config } = ctx;
   const idx = mealIndex(ctx);
-  const used = new Set();
+  const counts = new Map();
+  const regular = new Map(); // occurrences sur les jours ordinaires : base du budget de répétitions
+  const foods = new Set();
   let offal = 0;
   let salmon = 0;
   let legume = 0;
   plan.days.forEach((d, i) => {
     if (i === except) return;
+    const fixed = isFixedType(config, d.dayType);
     for (const [, id] of d.meals) {
-      used.add(id);
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+      if (!fixed) regular.set(id, (regular.get(id) ?? 0) + 1);
       const m = idx.get(id);
       if (!m) continue;
-      if (isOffal(m, ctx.config)) offal += 1;
-      if (isSalmon(m, ctx.config)) salmon += 1;
-      if (isLegume(m, ctx.config)) legume += 1;
+      if (!fixed) for (const f of foodIdsOf(m)) foods.add(f);
+      if (isOffal(m, config)) offal += 1;
+      if (isSalmon(m, config)) salmon += 1;
+      if (isLegume(m, config)) legume += 1;
     }
   });
-  return { used, offal, salmon, legume };
+  let repeats = 0;
+  for (const n of regular.values()) repeats += n - 1;
+  const budget = varietyBudget(config, plan.days.map((d) => d.dayType));
+  return { used: new Set(counts.keys()), counts, foods, repeats, repeatsLeft: Math.max(0, budget - repeats), offal, salmon, legume };
 }
 
-const baseFilter = (ctx, state) => ({ used: state.used, offalLeft: Math.max(0, ctx.config.planner.rules.maxOffalPerWeek - state.offal), repeat: false, anyContext: false });
+/** Semaine vide : rien de pris, tout le budget de répétitions disponible. */
+const emptyState = (ctx, plan) => ({ used: new Set(), counts: new Map(), foods: new Set(), repeats: 0, repeatsLeft: varietyBudget(ctx.config, plan.days.map((d) => d.dayType)), offal: 0, salmon: 0, legume: 0 });
+
+const baseFilter = (ctx, state) => ({ counts: state.counts, taken: new Set(), repeatsLeft: state.repeatsLeft, offalLeft: Math.max(0, ctx.config.planner.rules.maxOffalPerWeek - state.offal), repeat: false, anyContext: false });
 
 /** Un jour peut-il accueillir un repas au saumon (contextes stricts, repas encore libres) ? */
 function canSalmon(ctx, dt, state) {
@@ -171,7 +238,7 @@ function canLegume(ctx, dt, state) {
 
 // ------------------------------------------------------------------ tirage d'un jour
 // Du plus strict au plus souple : on ne relâche une règle que si la précédente est impossible à tenir.
-// Les contextes se relâchent d'abord, puis la répétition, puis le saumon du jour, puis les légumineuses du jour (si le jour doit
+// Les contextes se relâchent d'abord, puis les plafonds de répétition (dernier recours), puis le saumon du jour, puis les légumineuses du jour (si le jour doit
 // en contenir), puis un créneau peut rester vide.
 const LEVELS = [
   { needs: ['salmon', 'legume'], anyContext: false, repeat: false },
@@ -181,14 +248,34 @@ const LEVELS = [
   { needs: [], anyContext: true, repeat: true, partial: true },
 ];
 
-/** Un tirage : exigences d'abord (saumon, légumineuses), puis les autres créneaux. null si impossible à ce niveau. */
+/**
+ * Un tirage : exigences d'abord (saumon, légumineuses), puis les autres créneaux. null si impossible à ce niveau.
+ * Le choix dans un pool est pondéré : poids = (`reuseWeight` si le repas est déjà dans la semaine, sinon 1)
+ * × exp(`ingredientAffinity` × part de ses aliments déjà dans la semaine ou déjà pris ce jour-là).
+ */
 function attempt(ctx, dt, slots, rng, state, lv, needs) {
   const { config } = ctx;
+  const v = config.planner.variety;
+  const fixed = isFixedType(config, dt.id);
   const picks = new Array(slots.length).fill(null);
   const taken = new Set();
+  const foods = new Set(state.foods);
   let offalLeft = Math.max(0, config.planner.rules.maxOffalPerWeek - state.offal);
-  const filter = () => ({ used: new Set([...state.used, ...taken]), offalLeft, repeat: lv.repeat, anyContext: lv.anyContext });
-  const take = (i, meal) => { picks[i] = meal; taken.add(meal.id); if (isOffal(meal, config)) offalLeft -= 1; };
+  let repeatsLeft = state.repeatsLeft;
+  const filter = () => ({ counts: state.counts, taken, repeatsLeft, offalLeft, repeat: lv.repeat, anyContext: lv.anyContext });
+  const take = (i, meal) => {
+    picks[i] = meal;
+    taken.add(meal.id);
+    if (isOffal(meal, config)) offalLeft -= 1;
+    if (!fixed && state.counts.has(meal.id)) repeatsLeft -= 1;
+    for (const id of foodIdsOf(meal)) foods.add(id);
+  };
+  const weight = (m) => {
+    if (fixed) return 1; // un cheat meal est un bloc de macros saisies : ni aliments ni répétition à favoriser
+    const ids = foodIdsOf(m);
+    const share = ids.length ? ids.filter((id) => foods.has(id)).length / ids.length : 0;
+    return (state.counts.has(m.id) ? v.reuseWeight : 1) * Math.exp(v.ingredientAffinity * share);
+  };
   for (const n of needs) {
     const pred = (m) => NEEDS[n](m, config);
     if (picks.some((p) => p && pred(p))) continue; // déjà tenue par un repas tiré pour une autre exigence
@@ -200,13 +287,13 @@ function attempt(ctx, dt, slots, rng, state, lv, needs) {
     });
     if (!options.length) return null;
     const [i, pool] = pickOne(rng, options);
-    take(i, pickOne(rng, pool));
+    take(i, pickWeighted(rng, pool, weight));
   }
   for (let i = 0; i < slots.length; i += 1) {
     if (picks[i]) continue;
     const pool = poolFor(ctx, dt, slots[i], filter());
     if (!pool.length) { if (lv.partial) continue; return null; }
-    take(i, pickOne(rng, pool));
+    take(i, pickWeighted(rng, pool, weight));
   }
   return picks;
 }
@@ -296,7 +383,7 @@ export function generateWeek(ctx, { seed = 1, dayTypes = null } = {}) {
     days: ctx.week.map((w, i) => ({ label: w.label, dayType: dayTypes?.[i] ?? w.dayType, seed: mixSeed(s, i + 1), adjust: 1, meals: [], removed: [] })),
   };
   const dts = plan.days.map((d) => dayTypeOf(config, d.dayType));
-  const none = { used: new Set(), offal: 0, salmon: 0 };
+  const none = emptyState(ctx, plan);
   const open = [];
   plan.days.forEach((d, i) => {
     if (isFixedType(config, d.dayType)) d.meals = drawDay(ctx, dts[i], d.seed, stateOf(ctx, plan, i));
@@ -470,7 +557,7 @@ export function swapCandidates(ctx, plan, dayIndex, mealIndex) {
 /**
  * Pastilles d'un repas proposé : [{ code, label, level }]. Niveau `info` : `used` (déjà dans la semaine, plutôt un avantage). Niveau `warn` :
  * `category`, `context`, `milk-cocoa` et `offal` (quota d'abats dépassé). Choisir un repas signalé est permis : `auditPlan` affiche
- * ensuite le même message dans le planning (`repeat` en information, les autres en avertissement).
+ * ensuite le même message dans le planning (`repeat-cap` en information, les autres en avertissement).
  */
 export function swapIssues(ctx, plan, dayIndex, mealIndex, meal) {
   const setup = swapSetup(ctx, plan, dayIndex, mealIndex);
@@ -586,8 +673,14 @@ export function auditPlan(ctx, days, week = null) {
       warn(where, 'kcal-gap', `Budget de ${fmtKcal(d.budget)} kcal hors de portée avec ces repas (portions limitées à ×${fmtNum(d.factor, 2)}) : écart de ${fmtKcal(d.delta)} kcal.`);
     }
   }
+  // Variété : une répétition est normale (achats et cuisson par lots) tant qu'elle reste sous le plafond et le budget de la semaine.
   for (const [id, labels] of seen) {
-    if (labels.length > 1) warn(null, 'repeat', `« ${mealIndex(ctx).get(id)?.name ?? id} » revient ${labels.length} fois dans la semaine (${labels.join(', ')}).`, 'info');
+    if (labels.length > p.variety.maxPerMeal) warn(null, 'repeat-cap', `« ${mealIndex(ctx).get(id)?.name ?? id} » revient ${labels.length} fois dans la semaine (${labels.join(', ')}) : plus que les ${p.variety.maxPerMeal} fois prévues.`, 'info');
+  }
+  const regular = days.filter((d) => !d.fixed).flatMap((d) => d.items.filter((it) => it.meal).map((it) => it.id));
+  const distinct = new Set(regular).size;
+  if (regular.length && regular.length - distinct > varietyBudget(config, days.map((d) => d.dayType.id))) {
+    warn(null, 'variety', `Seulement ${fmtNum(Math.floor((distinct / regular.length) * 100))} % de repas distincts cette semaine (minimum ${fmtNum(Math.round(p.variety.minDistinctShare * 100))} %) : trop de repas reviennent.`);
   }
   if (week && week.budgetTotal !== null && week.budgetTotal > week.expenditure + 1) {
     warn(null, 'floor', `Le cheat meal est trop copieux pour tenir le maintien : le budget des autres jours est limité à ${fmtNum(p.floor * 100)} % de leur dépense, la semaine reste en surplus d'environ ${fmtKcal(week.budgetTotal - week.expenditure)} kcal.`);

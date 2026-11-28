@@ -17,6 +17,18 @@ const PROFILES = {
 };
 const SEEDS = Array.from({ length: 60 }, (_, i) => i * 7919 + 1);
 const ids = (plan) => plan.days.flatMap((d) => d.meals.map(([, id]) => id));
+/** Variété de la semaine : plafond par repas, jamais deux fois le même jour, plancher de repas distincts (hors jours fixes). */
+function assertVariety(plan, config, where) {
+  const v = config.planner.variety;
+  const count = new Map();
+  for (const d of plan.days) {
+    assert.equal(new Set(d.meals.map(([, id]) => id)).size, d.meals.length, `${where} : un repas deux fois le ${d.label}`);
+    for (const [, id] of d.meals) count.set(id, (count.get(id) ?? 0) + 1);
+  }
+  for (const [id, n] of count) assert.ok(n <= v.maxPerMeal, `${where} : ${id} ${n} fois`);
+  const regular = plan.days.filter((d) => !P.isFixedType(config, d.dayType)).flatMap((d) => d.meals.map(([, id]) => id));
+  assert.ok(new Set(regular).size / regular.length >= v.minDistinctShare - 1e-9, `${where} : ${new Set(regular).size} repas distincts sur ${regular.length}`);
+}
 const codes = (view) => view.warnings.map((x) => x.code);
 /** Repas à légumineuses d'un planning lu par viewPlan : nombre total et nombre de jours distincts. */
 const legumes = (view, config) => {
@@ -71,8 +83,8 @@ test('règles dures : tenues pour 60 graines et tous les profils fictifs, sans a
       // seul avertissement toléré : le plancher de 90 % (cheat meal trop copieux pour un petit gabarit), qui n'est pas une règle alimentaire
       assert.deepEqual(view.warnings.filter((x) => x.code !== 'floor'), [], where);
       assert.equal(plan.days.length, 7, where);
-      // pas de répétition d'un repas dans la semaine
-      assert.equal(new Set(ids(plan)).size, ids(plan).length, `${where} : répétition`);
+      // variété : plafond par repas, jamais deux fois le même jour, plancher de repas distincts hors cheat meal (voir aussi les tests « variété »)
+      assertVariety(plan, w.config, where);
       // légumineuses : au moins minLegumeMeals repas, sur autant de jours distincts ; saumon au moins une fois, abats au plus une fois
       for (const d of view.days) assert.equal(d.fixed, d.dayType.id === 'cheat', where);
       const lg = legumes(view, w.config);
@@ -88,6 +100,127 @@ test('règles dures : tenues pour 60 graines et tous les profils fictifs, sans a
       }
     }
   }
+});
+
+// ------------------------------------------------------------------ variété (répétitions autorisées)
+/** Contexte dont le bloc `planner.variety` est surchargé. */
+const withVariety = (w, patch) => ({ ...w, config: { ...w.config, planner: { ...w.config.planner, variety: { ...w.config.planner.variety, ...patch } } } });
+const shoppingLines = (view) => view.shopping.groups.reduce((n, g) => n + g.items.length, 0);
+
+test('variété : budget de répétitions = floor((1 − part distincte minimale) × créneaux de la semaine hors jour fixe)', async () => {
+  const w = await world();
+  const types = (week) => week.map((x) => x.dayType);
+  const slots = (config, ids) => ids.reduce((n, id) => (P.isFixedType(config, id) ? n : n + P.slotsFor(config, P.dayTypeOf(config, id)).length), 0);
+  const ids = types(plannerCtx(w).week);
+  const n = slots(w.config, ids);
+  assert.equal(P.varietyBudget(w.config, ids), Math.floor(0.3 * n + 1e-9));
+  assert.equal(P.varietyBudget(w.config, ['cheat']), 0, 'un jour fixe ne compte pas');
+  assert.equal(P.varietyBudget(w.config, []), 0);
+  // pas d'erreur d'arrondi : (1 − 0,8) × 10 créneaux = 2 répétitions
+  const cfg = withVariety(w, { minDistinctShare: 0.8 }).config;
+  assert.equal(P.varietyBudget(cfg, ['dimanche', 'dimanche', 'dimanche']), Math.floor(0.2 * slots(cfg, ['dimanche', 'dimanche', 'dimanche']) + 1e-9));
+  assert.equal(P.varietyBudget(withVariety(w, { minDistinctShare: 1 }).config, ids), 0);
+});
+
+test('variété : plafond par repas, jamais deux fois le même jour, plancher de repas distincts, pour tous les profils fictifs', async () => {
+  const w = await world();
+  let withRepeat = 0;
+  let weeks = 0;
+  for (const [name, profile] of Object.entries(PROFILES)) {
+    const ctx = plannerCtx(w, profile);
+    for (const seed of SEEDS) {
+      const plan = P.generateWeek(ctx, { seed });
+      assertVariety(plan, w.config, `${name}, graine ${seed}`);
+      const regular = plan.days.filter((d) => !P.isFixedType(w.config, d.dayType)).flatMap((d) => d.meals.map(([, id]) => id));
+      assert.ok(regular.length - new Set(regular).size <= P.varietyBudget(w.config, plan.days.map((d) => d.dayType)), `${name}, graine ${seed} : budget de répétitions dépassé`);
+      if (regular.length > new Set(regular).size) withRepeat += 1;
+      weeks += 1;
+    }
+  }
+  assert.ok(withRepeat > weeks / 2, `un repas revient dans la plupart des semaines (${withRepeat} sur ${weeks})`);
+});
+
+test('variété : maxPerMeal = 1 ou part distincte = 100 % redonnent l\'ancien comportement (aucun repas répété)', async () => {
+  const w = await world();
+  for (const patch of [{ maxPerMeal: 1 }, { minDistinctShare: 1 }]) {
+    const ctx = plannerCtx(withVariety(w, patch));
+    for (const seed of SEEDS.slice(0, 25)) {
+      const plan = P.generateWeek(ctx, { seed });
+      assert.equal(new Set(ids(plan)).size, ids(plan).length, `${JSON.stringify(patch)}, graine ${seed}`);
+      assert.deepEqual(codes(P.viewPlan(ctx, plan)).filter((c) => c !== 'floor'), []);
+    }
+  }
+});
+
+test('variété : une part distincte plus basse ou un plafond plus haut autorise davantage de répétitions, jamais au-delà du réglage', async () => {
+  const w = await world();
+  const repeated = (patch) => {
+    const ctx = plannerCtx(withVariety(w, patch));
+    return SEEDS.slice(0, 25).map((seed) => {
+      const plan = P.generateWeek(ctx, { seed });
+      assertVariety(plan, ctx.config, `${JSON.stringify(patch)}, graine ${seed}`);
+      return ids(plan).length - new Set(ids(plan)).size;
+    }).reduce((a, b) => a + b, 0);
+  };
+  assert.ok(repeated({ minDistinctShare: 0.5 }) > repeated({ minDistinctShare: 0.9 }));
+  assert.ok(repeated({ maxPerMeal: 3, minDistinctShare: 0.5, reuseWeight: 8 }) > 0);
+});
+
+test('variété : préférer les repas dont les aliments sont déjà dans la semaine réduit la liste de courses', async () => {
+  const w = await world();
+  const mean = (patch) => {
+    const ctx = plannerCtx(withVariety(w, patch));
+    const xs = SEEDS.slice(0, 30).map((seed) => shoppingLines(P.viewPlan(ctx, P.generateWeek(ctx, { seed }))));
+    return xs.reduce((a, b) => a + b, 0) / xs.length;
+  };
+  const neutral = mean({ maxPerMeal: 1, reuseWeight: 1, ingredientAffinity: 0 });
+  const tuned = mean({});
+  assert.ok(tuned < neutral * 0.9, `${tuned.toFixed(1)} aliments à acheter contre ${neutral.toFixed(1)} sans préférence`);
+});
+
+test('variété : regénérer un jour ou changer son type garde le plafond et le plancher, sans toucher aux autres jours', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  for (const seed of SEEDS.slice(0, 12)) {
+    const plan = P.generateWeek(ctx, { seed });
+    for (let i = 0; i < plan.days.length; i += 1) {
+      const others = (p) => p.days.filter((_, j) => j !== i);
+      const again = P.regenerateDay(ctx, plan, i, { seed: seed + 5 });
+      assert.deepEqual(others(again), others(plan));
+      assertVariety(again, w.config, `graine ${seed}, jour ${i} regénéré`);
+      const typed = P.setDayType(ctx, plan, i, plan.days[i].dayType === 'longue' ? 'courte' : 'longue', { seed: seed + 6 });
+      assert.deepEqual(others(typed), others(plan));
+      assertVariety(typed, w.config, `graine ${seed}, jour ${i} changé de type`);
+    }
+  }
+});
+
+test('auditPlan : « variety » sous la part distincte minimale, « repeat-cap » au-delà du plafond, plus de « repeat »', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  const plan = P.generateWeek(plannerCtx(withVariety(w, { maxPerMeal: 1 })), { seed: 1 }); // semaine sans aucune répétition
+  const base = P.viewPlan(ctx, plan);
+  assert.ok(!codes(base).some((c) => ['variety', 'repeat-cap', 'repeat'].includes(c)));
+  // le même déjeuner partout : au-delà du plafond et sous la part distincte
+  const lunch = plan.days[0].meals.find(([slot]) => slot === 'Déjeuner')[1];
+  const flat = JSON.parse(JSON.stringify(plan));
+  for (const d of flat.days) for (const m of d.meals) if (m[0] === 'Déjeuner' && d.dayType !== 'cheat') m[1] = lunch;
+  const view = P.viewPlan(ctx, flat);
+  const cap = view.warnings.find((x) => x.code === 'repeat-cap');
+  assert.ok(cap && cap.level === 'info' && cap.day === null && cap.text.includes('fois dans la semaine'));
+  assert.ok(!codes(view).includes('repeat'));
+  // 6 déjeuners identiques sur 32 créneaux : 5 répétitions, sous le budget (9) : pas d'avertissement de variété
+  assert.ok(!codes(view).includes('variety'));
+  // tous les créneaux de même catégorie identiques : le budget de répétitions est dépassé
+  const many = JSON.parse(JSON.stringify(plan));
+  const bySlot = new Map();
+  for (const d of many.days) if (d.dayType !== 'cheat') for (const m of d.meals) { if (!bySlot.has(m[0])) bySlot.set(m[0], m[1]); m[1] = bySlot.get(m[0]); }
+  const warn = P.viewPlan(ctx, many).warnings.find((x) => x.code === 'variety');
+  assert.ok(warn && warn.level === 'warn' && warn.day === null && /% de repas distincts/.test(warn.text));
+  // retirer des repas (non répétés) ne déclenche pas d'avertissement de variété
+  let removed = plan;
+  for (let k = 0; k < 4; k += 1) removed = P.removeMealAt(removed, k, 0);
+  assert.ok(!codes(P.viewPlan(ctx, removed)).includes('variety'));
 });
 
 test('créneaux : un repas par créneau du type de journée, dans l\'ordre, avec la bonne catégorie et un contexte accepté', async () => {
@@ -240,14 +373,26 @@ test('regenerateDay : reproductible avec une graine, graine suivante dérivée s
 test('regenerateDay : le saumon de la semaine ne disparaît pas quand on regénère le seul jour qui en avait', async () => {
   const w = await world();
   const ctx = plannerCtx(w);
+  const sal = (id) => P.isSalmon(ctx.mealIdx.get(id), w.config);
   let checked = 0;
-  for (const seed of SEEDS) {
-    const plan = P.generateWeek(ctx, { seed });
-    const view = P.viewPlan(ctx, plan);
-    const withSalmon = view.days.filter((d) => d.items.some((it) => P.isSalmon(it.meal, w.config)));
-    if (withSalmon.length !== 1) continue;
+  for (const seed of SEEDS.slice(0, 20)) {
+    const plan = JSON.parse(JSON.stringify(P.generateWeek(ctx, { seed })));
+    const first = plan.days.findIndex((d) => d.meals.some(([, id]) => sal(id)));
+    if (first < 0) continue;
+    // un repas au saumon peut revenir : on le remplace partout ailleurs par un repas du même créneau, accepté par le type de jour
+    plan.days.forEach((d, i) => {
+      if (i === first) return;
+      const accepted = P.contextsFor(w.config, P.dayTypeOf(w.config, d.dayType));
+      d.meals = d.meals.map(([slot, id]) => {
+        if (!sal(id)) return [slot, id];
+        const other = ctx.meals.find((m) => m.category === slot && !m.cheat && !P.isSalmon(m, w.config) && m.contexts.some((c) => accepted.includes(c)));
+        return [slot, other ? other.id : id];
+      });
+    });
+    const only = P.viewPlan(ctx, plan).days.filter((d) => d.items.some((it) => P.isSalmon(it.meal, w.config)));
+    if (only.length !== 1) continue;
     for (let k = 0; k < 4; k += 1) {
-      const next = P.regenerateDay(ctx, plan, withSalmon[0].index, { seed: seed + k });
+      const next = P.regenerateDay(ctx, plan, only[0].index, { seed: seed + k });
       assert.ok(!codes(P.viewPlan(ctx, next)).includes('salmon'), `graine ${seed}`);
     }
     checked += 1;
@@ -361,7 +506,7 @@ test('toute combinaison de types de journée donne un planning lisible : règles
     const plan = P.generateWeek(ctx, { seed: n + 1, dayTypes });
     const view = P.viewPlan(ctx, plan);
     assert.deepEqual(plan.days.map((d) => d.dayType), dayTypes);
-    for (const wn of view.warnings) assert.ok(['repeat', 'context', 'empty-slot', 'legume', 'salmon', 'kcal-gap', 'floor'].includes(wn.code), `${dayTypes} : ${wn.code}`);
+    for (const wn of view.warnings) assert.ok(['repeat-cap', 'variety', 'context', 'empty-slot', 'legume', 'salmon', 'kcal-gap', 'floor'].includes(wn.code), `${dayTypes} : ${wn.code}`);
     // les règles qui ne se relâchent jamais
     const all = view.days.flatMap((d) => d.items.map((it) => it.meal));
     assert.ok(all.filter((m) => P.isOffal(m, w.config)).length <= 1, 'abats');
@@ -370,23 +515,38 @@ test('toute combinaison de types de journée donne un planning lisible : règles
 });
 
 // ------------------------------------------------------------------ contraintes impossibles : avertissements
-test('contrainte impossible : quatre jours de cheat meal pour deux repas → répétitions inévitables, signalées', async () => {
+test('contrainte impossible : quatre jours de cheat meal pour deux repas → ils reviennent (normal, sous le plafond), aucun jour vide', async () => {
   const w = await world();
   const ctx = plannerCtx(w);
-  const view = P.viewPlan(ctx, P.generateWeek(ctx, { seed: 2, dayTypes: ['cheat', 'cheat', 'repos', 'cheat', 'repos', 'cheat', 'dimanche'] }));
-  const repeats = view.warnings.filter((x) => x.code === 'repeat');
-  assert.ok(repeats.length >= 1, 'un cheat meal revient');
-  assert.ok(repeats[0].text.includes('fois dans la semaine'));
-  assert.equal(new Set(ids(P.generateWeek(ctx, { seed: 2, dayTypes: ['cheat', 'cheat', 'repos', 'cheat', 'repos', 'cheat', 'dimanche'] }))).size >= 2, true);
+  const types = ['cheat', 'cheat', 'repos', 'cheat', 'repos', 'cheat', 'dimanche'];
+  const plan = P.generateWeek(ctx, { seed: 2, dayTypes: types });
+  const view = P.viewPlan(ctx, plan);
+  const cheats = plan.days.filter((d) => d.dayType === 'cheat').map((d) => d.meals[0][1]);
+  assert.equal(new Set(cheats).size, 2, 'les deux cheat meals servent, deux fois chacun');
+  assert.ok(!codes(view).includes('repeat'), 'plus d\'information « repeat » : une répétition est normale');
+  assert.ok(!codes(view).includes('repeat-cap'), 'deux fois chacun : sous le plafond');
   assert.ok(view.days.every((d) => d.items.length === P.slotsFor(w.config, d.dayType).length), 'aucun jour vide : la répétition est préférée au créneau vide');
 });
 
-test('sept jours de sortie longue : assez de repas dans la cascade de contextes pour ne rien répéter', async () => {
+test('contrainte impossible : sept jours de cheat meal pour deux repas → au-delà du plafond, information « repeat-cap »', async () => {
   const w = await world();
   const ctx = plannerCtx(w);
-  const view = P.viewPlan(ctx, P.generateWeek(ctx, { seed: 2, dayTypes: Array(7).fill('longue') }));
-  assert.ok(!codes(view).includes('repeat'));
-  assert.ok(view.days.every((d) => d.items.length === 6));
+  const view = P.viewPlan(ctx, P.generateWeek(ctx, { seed: 2, dayTypes: Array(7).fill('cheat') }));
+  const caps = view.warnings.filter((x) => x.code === 'repeat-cap');
+  assert.ok(caps.length >= 1 && caps.every((x) => x.level === 'info' && x.day === null && x.text.includes('fois dans la semaine')));
+  assert.ok(view.days.every((d) => d.items.length === 1));
+});
+
+test('sept jours de sortie longue : assez de repas dans la cascade de contextes, variété tenue sans avertissement', async () => {
+  const w = await world();
+  const ctx = plannerCtx(w);
+  for (const seed of [2, 3, 4, 5]) {
+    const plan = P.generateWeek(ctx, { seed, dayTypes: Array(7).fill('longue') });
+    const view = P.viewPlan(ctx, plan);
+    assert.ok(!codes(view).some((c) => ['repeat', 'repeat-cap', 'variety', 'empty-slot'].includes(c)), `graine ${seed}`);
+    assert.ok(view.days.every((d) => d.items.length === 6));
+    assertVariety(plan, w.config, `graine ${seed}`);
+  }
 });
 
 test('contrainte impossible : sans saumon dans le recueil → avertissement, le reste du planning est généré', async () => {
@@ -955,6 +1115,11 @@ test('config.planner : validée par validate-data (références, listes, nombres
   assert.match(bad((p) => { p.adjust.week.min = 1.5; }), /adjust\.week/);
   assert.match(bad((p) => { p.adjust.day.max = 0.9; }), /adjust\.day/);
   assert.match(bad((p) => { p.adjust.step = 0; }), /adjust\.step/);
+  assert.match(bad((p) => { delete p.variety; }), /variety : bloc/);
+  assert.match(bad((p) => { p.variety.maxPerMeal = 0; }), /variety\.maxPerMeal/);
+  assert.match(bad((p) => { p.variety.minDistinctShare = 1.2; }), /variety\.minDistinctShare/);
+  assert.match(bad((p) => { p.variety.reuseWeight = 0; }), /variety\.reuseWeight/);
+  assert.match(bad((p) => { p.variety.ingredientAffinity = -1; }), /variety\.ingredientAffinity/);
   const noBlock = structuredClone(w.config);
   delete noBlock.planner;
   assert.match(validateData({ foods: w.foods, internal: { schemaVersion: 1, ingredients: w.internal }, meals: { schemaVersion: 1, meals: w.meals.map((m) => m.def) }, days: w.days, config: noBlock }).errors.join('\n'), /bloc « planner » manquant/);
