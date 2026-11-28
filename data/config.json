@@ -106,6 +106,12 @@
       "maxOffalPerWeek": 1,
       "milkCocoa": { "milk": ["lait-demi-ecreme", "lait-ecreme"], "cocoa": ["cacao-sucre"], "outings": ["moyenne", "longue"] }
     },
+    "variety": {
+      "maxPerMeal": 2,
+      "minDistinctShare": 0.7,
+      "reuseWeight": 3,
+      "ingredientAffinity": 3
+    },
     "attempts": 60,
     "floor": 0.9,
     "step": 0.01,
