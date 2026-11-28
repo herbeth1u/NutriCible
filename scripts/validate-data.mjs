@@ -244,6 +244,39 @@ export function validateData({ foods, internal, meals, days, config }) {
     }
     for (const k of ['gapWarning', 'balanceTolerance']) if (!isNum(pl[k]) || pl[k] <= 0) err(`config.planner.${k} : nombre positif attendu`);
     for (const k of ['protein', 'fiber']) if (!isNum(pl.score?.[k]) || pl.score[k] < 0) err(`config.planner.score.${k} : nombre positif ou nul attendu`);
+    // retouche des quantités (après le tirage) : plafond de lignes, bornes, seuils bleu/jaune, catégories exclues, poids du coût et règles par type d'aliment
+    const tn = pl.tune;
+    if (!isObj(tn)) err('config.planner.tune : bloc { enabled, maxTweaks, maxIterations, bounds, major, excludeCategories, weights, types } manquant');
+    else {
+      if (typeof tn.enabled !== 'boolean') err('config.planner.tune.enabled : booléen attendu');
+      if (!Number.isInteger(tn.maxTweaks) || tn.maxTweaks < 1 || tn.maxTweaks > 5) err('config.planner.tune.maxTweaks : entier entre 1 et 5 attendu');
+      if (!Number.isInteger(tn.maxIterations) || tn.maxIterations < 1) err('config.planner.tune.maxIterations : entier ≥ 1 attendu');
+      const range = (r) => isObj(r) && isNum(r.min) && isNum(r.max);
+      const bounds = tn.bounds;
+      const boundsOk = range(bounds) && bounds.min > 0 && bounds.min <= 1 && bounds.max >= 1;
+      if (!boundsOk) err('config.planner.tune.bounds : { min, max } attendu, avec 0 < min ≤ 1 ≤ max');
+      const major = tn.major;
+      if (!range(major) || !(major.min <= 1 && major.max >= 1) || (boundsOk && !(bounds.min <= major.min && major.max <= bounds.max))) err('config.planner.tune.major : { min, max } attendu, avec bounds.min ≤ major.min ≤ 1 ≤ major.max ≤ bounds.max');
+      if (!Array.isArray(tn.excludeCategories)) err('config.planner.tune.excludeCategories : tableau de catégories attendu');
+      else for (const c of tn.excludeCategories) if (typeof c !== 'string' || !cats.includes(c)) err(`config.planner.tune.excludeCategories : catégorie « ${c} » inconnue`);
+      const wts = tn.weights;
+      if (!isObj(wts)) err('config.planner.tune.weights : { kcal, protein, carbs, fat, fiber, reg } attendu');
+      else {
+        for (const k of ['kcal', 'protein', 'carbs', 'fat', 'fiber', 'reg']) if (!isNum(wts[k]) || wts[k] < 0) err(`config.planner.tune.weights.${k} : nombre positif ou nul attendu`);
+        for (const k of ['kcal', 'protein']) if (isNum(wts[k]) && !(wts[k] > 0)) err(`config.planner.tune.weights.${k} : nombre strictement positif attendu`);
+      }
+      const types = tn.types;
+      if (!isObj(types) || !Object.keys(types).length) err('config.planner.tune.types : au moins un type d\'aliment attendu');
+      else {
+        const usedTypes = new Set(mealList.flatMap((m) => (m.items ?? []).map(([id]) => foodList.find((f) => f.id === id)?.type)));
+        for (const [type, rule] of Object.entries(types)) {
+          if (!ftypes.includes(type)) err(`config.planner.tune.types : type d'aliment « ${type} » inconnu`);
+          else if (!usedTypes.has(type)) warnings.push(`config.planner.tune.types : aucun aliment de type « ${type} » dans un repas du recueil (règle inutile)`);
+          if (!isObj(rule) || !isNum(rule.step) || rule.step <= 0) { err(`config.planner.tune.types.${type}.step : nombre strictement positif attendu`); continue; }
+          if (!isNum(rule.min) || !isNum(rule.max) || !(rule.min <= 1 && rule.max >= 1) || (boundsOk && !(bounds.min <= rule.min && rule.max <= bounds.max))) err(`config.planner.tune.types.${type} : { min, max } attendu, avec bounds.min ≤ min ≤ 1 ≤ max ≤ bounds.max`);
+        }
+      }
+    }
   }
 
   return { errors, warnings };
